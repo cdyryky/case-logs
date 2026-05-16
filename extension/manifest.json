@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "ACGME IR Case Log Autofill",
+  "version": "0.1.0",
+  "description": "Preview and autofill approved local ACGME IR case-log entries.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["<all_urls>", "http://localhost:8765/*", "http://127.0.0.1:8765/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ACGME IR Autofill"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

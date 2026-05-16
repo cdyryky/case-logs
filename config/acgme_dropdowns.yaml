@@ -1,0 +1,2122 @@
+{
+  "site": {
+    "default": "University of California (Davis) Medical Center",
+    "allowed": [
+      "Kaiser Permanente Medical Center, Roseville",
+      "Kaiser Permanente Medical Center, South Sacramento",
+      "University of California (Davis) Medical Center"
+    ]
+  },
+  "patient_type": {
+    "allowed": [
+      "Adult",
+      "Pediatric"
+    ]
+  },
+  "role": {
+    "allowed": [
+      "Primary",
+      "Secondary"
+    ],
+    "avoid": [
+      "Assisting"
+    ]
+  },
+  "case_year": {
+    "allowed": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "case_options": [
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Aortic stent grafting",
+        "canonical_key": "aortic_stent_grafting"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial PTA",
+        "canonical_key": "arterial_pta"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial atherectomy",
+        "canonical_key": "arterial_atherectomy"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial embolization",
+        "canonical_key": "arterial_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial foreign body retrieval",
+        "canonical_key": "arterial_foreign_body_retrieval"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial line placement for monitoring",
+        "canonical_key": "arterial_line_placement_for_monitoring"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial mechanical thrombectomy",
+        "canonical_key": "arterial_mechanical_thrombectomy"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial stent",
+        "canonical_key": "arterial_stent"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial thrombolysis - initial",
+        "canonical_key": "arterial_thrombolysis_initial"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial vascular closure",
+        "canonical_key": "arterial_vascular_closure"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Arterial vascular repair",
+        "canonical_key": "arterial_vascular_repair"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Thrombolysis catheter change arterial",
+        "canonical_key": "thrombolysis_catheter_change_arterial"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Arterial Interventions",
+        "canonical_key": "arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Thrombolysis catheter check arterial",
+        "canonical_key": "thrombolysis_catheter_check_arterial"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Biliary diagnostic",
+        "canonical_key": "biliary_diagnostic"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Biliary stent placement",
+        "canonical_key": "biliary_stent_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Biliary stent removal",
+        "canonical_key": "biliary_stent_removal"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Biliary stone removal",
+        "canonical_key": "biliary_stone_removal"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Biliary stricture dilation",
+        "canonical_key": "biliary_stricture_dilation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Biliary tube maintenance",
+        "canonical_key": "biliary_tube_maintenance"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Cholecystostomy tube placement",
+        "canonical_key": "cholecystostomy_tube_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biliary Interventions",
+        "canonical_key": "biliary_interventions"
+      },
+      "type": {
+        "visible_label": "Percutaneous biliary catheter drainage",
+        "canonical_key": "percutaneous_biliary_catheter_drainage"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy abdominal/retroperitoneal",
+        "canonical_key": "biopsy_abdominal_retroperitoneal"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy cervical nodal",
+        "canonical_key": "biopsy_cervical_nodal"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy lymph node",
+        "canonical_key": "biopsy_lymph_node"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy musculoskeletal",
+        "canonical_key": "biopsy_musculoskeletal"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy other",
+        "canonical_key": "biopsy_other"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy soft tissue",
+        "canonical_key": "biopsy_soft_tissue"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy thoracic",
+        "canonical_key": "biopsy_thoracic"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy thyroid",
+        "canonical_key": "biopsy_thyroid"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Biopsy transvenous",
+        "canonical_key": "biopsy_transvenous"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Biopsy",
+        "canonical_key": "biopsy"
+      },
+      "type": {
+        "visible_label": "Fiducial marker placement",
+        "canonical_key": "fiducial_marker_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Body Procedures",
+        "canonical_key": "body_procedures"
+      },
+      "type": {
+        "visible_label": "Ultrasound Imaging",
+        "canonical_key": "ultrasound_imaging"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Arteriography",
+        "canonical_key": "diagnostic_arteriography"
+      },
+      "type": {
+        "visible_label": "Intravascular ultrasound arterial",
+        "canonical_key": "intravascular_ultrasound_arterial"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Arteriography",
+        "canonical_key": "diagnostic_arteriography"
+      },
+      "type": {
+        "visible_label": "Non-selective aortic angiogram",
+        "canonical_key": "non_selective_aortic_angiogram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Arteriography",
+        "canonical_key": "diagnostic_arteriography"
+      },
+      "type": {
+        "visible_label": "Selective neuro/spinal angiogram",
+        "canonical_key": "selective_neuro_spinal_angiogram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Arteriography",
+        "canonical_key": "diagnostic_arteriography"
+      },
+      "type": {
+        "visible_label": "Selective peripheral angiogram",
+        "canonical_key": "selective_peripheral_angiogram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Arteriography",
+        "canonical_key": "diagnostic_arteriography"
+      },
+      "type": {
+        "visible_label": "Selective visceral angiogram",
+        "canonical_key": "selective_visceral_angiogram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Radiology",
+        "canonical_key": "diagnostic_radiology"
+      },
+      "type": {
+        "visible_label": "CT Abd/Pel",
+        "canonical_key": "ct_abd_pel"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Radiology",
+        "canonical_key": "diagnostic_radiology"
+      },
+      "type": {
+        "visible_label": "CTA/MRA",
+        "canonical_key": "cta_mra"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Venography",
+        "canonical_key": "diagnostic_venography"
+      },
+      "type": {
+        "visible_label": "Central venography",
+        "canonical_key": "central_venography"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Venography",
+        "canonical_key": "diagnostic_venography"
+      },
+      "type": {
+        "visible_label": "Intravascular ultrasound venous",
+        "canonical_key": "intravascular_ultrasound_venous"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Venography",
+        "canonical_key": "diagnostic_venography"
+      },
+      "type": {
+        "visible_label": "Peripheral extremity venography",
+        "canonical_key": "peripheral_extremity_venography"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Diagnostic Venography",
+        "canonical_key": "diagnostic_venography"
+      },
+      "type": {
+        "visible_label": "Visceral venography",
+        "canonical_key": "visceral_venography"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Dialysis Shunt Management",
+        "canonical_key": "dialysis_shunt_management"
+      },
+      "type": {
+        "visible_label": "Dialysis access PTA",
+        "canonical_key": "dialysis_access_pta"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Dialysis Shunt Management",
+        "canonical_key": "dialysis_shunt_management"
+      },
+      "type": {
+        "visible_label": "Dialysis access fistulagram",
+        "canonical_key": "dialysis_access_fistulagram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Dialysis Shunt Management",
+        "canonical_key": "dialysis_shunt_management"
+      },
+      "type": {
+        "visible_label": "Dialysis access occlusion/reduction",
+        "canonical_key": "dialysis_access_occlusion_reduction"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Dialysis Shunt Management",
+        "canonical_key": "dialysis_shunt_management"
+      },
+      "type": {
+        "visible_label": "Dialysis access stent",
+        "canonical_key": "dialysis_access_stent"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Dialysis Shunt Management",
+        "canonical_key": "dialysis_shunt_management"
+      },
+      "type": {
+        "visible_label": "Dialysis access thrombectomy/thrombolysis",
+        "canonical_key": "dialysis_access_thrombectomy_thrombolysis"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Dialysis Shunt Management",
+        "canonical_key": "dialysis_shunt_management"
+      },
+      "type": {
+        "visible_label": "Percutaneous AVF creation",
+        "canonical_key": "percutaneous_avf_creation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Dialysis Shunt Management",
+        "canonical_key": "dialysis_shunt_management"
+      },
+      "type": {
+        "visible_label": "Peritoneal dialysis catheter",
+        "canonical_key": "peritoneal_dialysis_catheter"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Drainage tube check",
+        "canonical_key": "drainage_tube_check"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Drainage tube exchange",
+        "canonical_key": "drainage_tube_exchange"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Drainage tube placement",
+        "canonical_key": "drainage_tube_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Drainage tube removal",
+        "canonical_key": "drainage_tube_removal"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Fistula/sinus track manipulation",
+        "canonical_key": "fistula_sinus_track_manipulation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Fluid aspiration",
+        "canonical_key": "fluid_aspiration"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Paracentesis",
+        "canonical_key": "paracentesis"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Sclerosis",
+        "canonical_key": "sclerosis"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Drainage Procedures",
+        "canonical_key": "drainage_procedures"
+      },
+      "type": {
+        "visible_label": "Thoracentesis",
+        "canonical_key": "thoracentesis"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GI Intervention",
+        "canonical_key": "gi_intervention"
+      },
+      "type": {
+        "visible_label": "Cecostomy",
+        "canonical_key": "cecostomy"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GI Intervention",
+        "canonical_key": "gi_intervention"
+      },
+      "type": {
+        "visible_label": "Dilation of GI stricture",
+        "canonical_key": "dilation_of_gi_stricture"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GI Intervention",
+        "canonical_key": "gi_intervention"
+      },
+      "type": {
+        "visible_label": "GI tube maintenance general",
+        "canonical_key": "gi_tube_maintenance_general"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GI Intervention",
+        "canonical_key": "gi_intervention"
+      },
+      "type": {
+        "visible_label": "Percutaneous upper GI access",
+        "canonical_key": "percutaneous_upper_gi_access"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GI Intervention",
+        "canonical_key": "gi_intervention"
+      },
+      "type": {
+        "visible_label": "Stent of GI stricture",
+        "canonical_key": "stent_of_gi_stricture"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GI Intervention",
+        "canonical_key": "gi_intervention"
+      },
+      "type": {
+        "visible_label": "UGI intubation",
+        "canonical_key": "ugi_intubation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Cystostomy tube placement",
+        "canonical_key": "cystostomy_tube_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "GU diagnostic pyelogram",
+        "canonical_key": "gu_diagnostic_pyelogram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "GU stricture dilation",
+        "canonical_key": "gu_stricture_dilation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "GU tube maintenance general",
+        "canonical_key": "gu_tube_maintenance_general"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "GU tube/stent exchange",
+        "canonical_key": "gu_tube_stent_exchange"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "GU tube/stent removal",
+        "canonical_key": "gu_tube_stent_removal"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Hystero/fallopian intervention",
+        "canonical_key": "hystero_fallopian_intervention"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Nephroscopy",
+        "canonical_key": "nephroscopy"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Nephrostomy tube placement",
+        "canonical_key": "nephrostomy_tube_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Nephroureteral stent antegrade placement",
+        "canonical_key": "nephroureteral_stent_antegrade_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Renal stone manipulation",
+        "canonical_key": "renal_stone_manipulation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Ureteral embolization",
+        "canonical_key": "ureteral_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Ureteral stent double J placement",
+        "canonical_key": "ureteral_stent_double_j_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "GU Intervention",
+        "canonical_key": "gu_intervention"
+      },
+      "type": {
+        "visible_label": "Ureteronepheral stent retrograde placement",
+        "canonical_key": "ureteronepheral_stent_retrograde_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Airway stent general",
+        "canonical_key": "airway_stent_general"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Cervical Thoracic CSF puncture",
+        "canonical_key": "cervical_thoracic_csf_puncture"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Foreign body retrieval non-vascular",
+        "canonical_key": "foreign_body_retrieval_non_vascular"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Lumbar CSF puncture",
+        "canonical_key": "lumbar_csf_puncture"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Lymphangiography diagnostic",
+        "canonical_key": "lymphangiography_diagnostic"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Lymphatic embolization peripheral",
+        "canonical_key": "lymphatic_embolization_peripheral"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Lymphatic embolization thoracic duct",
+        "canonical_key": "lymphatic_embolization_thoracic_duct"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Myelography",
+        "canonical_key": "myelography"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Lymphatic Interventions and Other",
+        "canonical_key": "lymphatic_interventions_and_other"
+      },
+      "type": {
+        "visible_label": "Other unlisted procedure",
+        "canonical_key": "other_unlisted_procedure"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Musculoskeletal Interventions/Pain Management",
+        "canonical_key": "musculoskeletal_interventions_pain_management"
+      },
+      "type": {
+        "visible_label": "Arthrography",
+        "canonical_key": "arthrography"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Musculoskeletal Interventions/Pain Management",
+        "canonical_key": "musculoskeletal_interventions_pain_management"
+      },
+      "type": {
+        "visible_label": "Neuro blockade/injection",
+        "canonical_key": "neuro_blockade_injection"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Musculoskeletal Interventions/Pain Management",
+        "canonical_key": "musculoskeletal_interventions_pain_management"
+      },
+      "type": {
+        "visible_label": "Vertebral augmentation",
+        "canonical_key": "vertebral_augmentation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Musculoskeletal Interventions/Pain Management",
+        "canonical_key": "musculoskeletal_interventions_pain_management"
+      },
+      "type": {
+        "visible_label": "Vertebroplasty",
+        "canonical_key": "vertebroplasty"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Neuro arterial PTA",
+        "canonical_key": "neuro_arterial_pta"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Neuro arterial embolization",
+        "canonical_key": "neuro_arterial_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Neuro arterial stent",
+        "canonical_key": "neuro_arterial_stent"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Neuro venous PTA",
+        "canonical_key": "neuro_venous_pta"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Neuro venous embolization",
+        "canonical_key": "neuro_venous_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Neuro venous stent",
+        "canonical_key": "neuro_venous_stent"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Selective neuro angiography",
+        "canonical_key": "selective_neuro_angiography"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Thrombectomy neuro artery",
+        "canonical_key": "thrombectomy_neuro_artery"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Thrombectomy neuro venous",
+        "canonical_key": "thrombectomy_neuro_venous"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Thrombolysis neuro artery",
+        "canonical_key": "thrombolysis_neuro_artery"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Neurovascular Interventions",
+        "canonical_key": "neurovascular_interventions"
+      },
+      "type": {
+        "visible_label": "Thrombolysis neuro venous",
+        "canonical_key": "thrombolysis_neuro_venous"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Patient Evaluation",
+        "canonical_key": "patient_evaluation"
+      },
+      "type": {
+        "visible_label": "New Outpatient Clinic Evaluation",
+        "canonical_key": "new_outpatient_clinic_evaluation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "BRTO (balloon-occluded retrograde transvenous obliteration)",
+        "canonical_key": "brto_balloon_occluded_retrograde_transvenous_obliteration"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Diagnostic portal venogram",
+        "canonical_key": "diagnostic_portal_venogram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Portal varices embolization",
+        "canonical_key": "portal_varices_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Portal vein PTA",
+        "canonical_key": "portal_vein_pta"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Portal vein embolization",
+        "canonical_key": "portal_vein_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Portal vein stent",
+        "canonical_key": "portal_vein_stent"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Portal vein thrombectomy",
+        "canonical_key": "portal_vein_thrombectomy"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Portal vein thrombolysis - initial",
+        "canonical_key": "portal_vein_thrombolysis_initial"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "Portal vein thrombolysis catheter check",
+        "canonical_key": "portal_vein_thrombolysis_catheter_check"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Portal Interventions",
+        "canonical_key": "portal_interventions"
+      },
+      "type": {
+        "visible_label": "TIPS",
+        "canonical_key": "tips"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Pulmonary Arterial Interventions",
+        "canonical_key": "pulmonary_arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Diagnostic pulmonary angiogram",
+        "canonical_key": "diagnostic_pulmonary_angiogram"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Pulmonary Arterial Interventions",
+        "canonical_key": "pulmonary_arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Pulmonary artery PTA",
+        "canonical_key": "pulmonary_artery_pta"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Pulmonary Arterial Interventions",
+        "canonical_key": "pulmonary_arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Pulmonary artery embolization",
+        "canonical_key": "pulmonary_artery_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Pulmonary Arterial Interventions",
+        "canonical_key": "pulmonary_arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Pulmonary artery stent",
+        "canonical_key": "pulmonary_artery_stent"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Pulmonary Arterial Interventions",
+        "canonical_key": "pulmonary_arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Pulmonary artery thrombectomy",
+        "canonical_key": "pulmonary_artery_thrombectomy"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Pulmonary Arterial Interventions",
+        "canonical_key": "pulmonary_arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Pulmonary artery thrombolysis",
+        "canonical_key": "pulmonary_artery_thrombolysis"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Pulmonary Arterial Interventions",
+        "canonical_key": "pulmonary_arterial_interventions"
+      },
+      "type": {
+        "visible_label": "Thrombolysis catheter check pulmonary artery",
+        "canonical_key": "thrombolysis_catheter_check_pulmonary_artery"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Tumor Ablation",
+        "canonical_key": "tumor_ablation"
+      },
+      "type": {
+        "visible_label": "Chemical ablation of tumor",
+        "canonical_key": "chemical_ablation_of_tumor"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Tumor Ablation",
+        "canonical_key": "tumor_ablation"
+      },
+      "type": {
+        "visible_label": "Other tumor ablation",
+        "canonical_key": "other_tumor_ablation"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Tumor Ablation",
+        "canonical_key": "tumor_ablation"
+      },
+      "type": {
+        "visible_label": "Thermal ablation bone tumor",
+        "canonical_key": "thermal_ablation_bone_tumor"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Tumor Ablation",
+        "canonical_key": "tumor_ablation"
+      },
+      "type": {
+        "visible_label": "Thermal ablation chest tumor",
+        "canonical_key": "thermal_ablation_chest_tumor"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Tumor Ablation",
+        "canonical_key": "tumor_ablation"
+      },
+      "type": {
+        "visible_label": "Thermal ablation soft tissue tumor",
+        "canonical_key": "thermal_ablation_soft_tissue_tumor"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Tumor Ablation",
+        "canonical_key": "tumor_ablation"
+      },
+      "type": {
+        "visible_label": "Thermal ablation vertebral tumor",
+        "canonical_key": "thermal_ablation_vertebral_tumor"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Tumor Ablation",
+        "canonical_key": "tumor_ablation"
+      },
+      "type": {
+        "visible_label": "Thermal ablation visceral organ tumor",
+        "canonical_key": "thermal_ablation_visceral_organ_tumor"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access explant",
+        "canonical_key": "venous_access_explant"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access line change",
+        "canonical_key": "venous_access_line_change"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access line check",
+        "canonical_key": "venous_access_line_check"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access placement - nontunneled",
+        "canonical_key": "venous_access_placement_nontunneled"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access repair",
+        "canonical_key": "venous_access_repair"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access reposition",
+        "canonical_key": "venous_access_reposition"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access stripping",
+        "canonical_key": "venous_access_stripping"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access thrombolysis",
+        "canonical_key": "venous_access_thrombolysis"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous access tunneled placement",
+        "canonical_key": "venous_access_tunneled_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Access General",
+        "canonical_key": "venous_access_general"
+      },
+      "type": {
+        "visible_label": "Venous port placement",
+        "canonical_key": "venous_port_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "IVC filter placement",
+        "canonical_key": "ivc_filter_placement"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Vascular malformation embolization",
+        "canonical_key": "vascular_malformation_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous PTA",
+        "canonical_key": "venous_pta"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous embolization",
+        "canonical_key": "venous_embolization"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous foreign body retrieval",
+        "canonical_key": "venous_foreign_body_retrieval"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous mechanical thrombectomy",
+        "canonical_key": "venous_mechanical_thrombectomy"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous sampling",
+        "canonical_key": "venous_sampling"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous stent",
+        "canonical_key": "venous_stent"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous thrombolysis - initial",
+        "canonical_key": "venous_thrombolysis_initial"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous thrombolysis catheter change",
+        "canonical_key": "venous_thrombolysis_catheter_change"
+      }
+    },
+    {
+      "class": {
+        "visible_label": "Interventional Procedures",
+        "canonical_key": "interventional_procedures"
+      },
+      "area": {
+        "visible_label": "Venous Interventions",
+        "canonical_key": "venous_interventions"
+      },
+      "type": {
+        "visible_label": "Venous thrombolysis catheter check",
+        "canonical_key": "venous_thrombolysis_catheter_check"
+      }
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>ACGME IR Autofill</title>
+    <style>
+      body {
+        width: 420px;
+        margin: 0;
+        font: 12px/1.25 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172033;
+        background: #f7f8fb;
+      }
+      header {
+        padding: 7px 10px;
+        background: #ffffff;
+        border-bottom: 1px solid #dce1ea;
+        font-weight: 700;
+      }
+      main { padding: 8px 10px; }
+      .entry {
+        background: #ffffff;
+        border: 1px solid #dce1ea;
+        border-radius: 6px;
+        padding: 7px 8px;
+      }
+      .entry-main {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-weight: 700;
+      }
+      .entry-sub {
+        margin-top: 3px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #263349;
+      }
+      .mini-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
+        margin-top: 5px;
+      }
+      .mini {
+        background: #f2f5fa;
+        border-radius: 4px;
+        padding: 3px 5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .mini b {
+        color: #667085;
+        font-weight: 700;
+        margin-right: 3px;
+      }
+      .source-line {
+        margin-top: 5px;
+        color: #49566b;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .entry-details {
+        display: none;
+        margin-top: 4px;
+        color: #566277;
+        white-space: pre-wrap;
+      }
+      .entry.expanded .entry-details { display: block; }
+      #details {
+        margin-top: 4px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #155eef;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .buttons {
+        display: grid;
+        grid-template-columns: 38px 38px 1fr 1fr;
+        gap: 5px;
+        margin-top: 7px;
+      }
+      button {
+        border: 1px solid #c5ccd8;
+        background: #ffffff;
+        color: #172033;
+        border-radius: 5px;
+        padding: 5px 4px;
+        font-weight: 650;
+        cursor: pointer;
+        font-size: 11px;
+        line-height: 1.1;
+        min-height: 28px;
+      }
+      button.transport {
+        font-size: 15px;
+        padding: 4px 0;
+      }
+      button.primary {
+        background: #155eef;
+        border-color: #155eef;
+        color: white;
+      }
+      button.danger {
+        color: #9f1c1c;
+      }
+      #status {
+        margin-top: 6px;
+        min-height: 14px;
+        color: #49566b;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <header>ACGME IR Autofill</header>
+    <main>
+      <div id="entry" class="entry">
+        <div class="entry-main">
+          <span id="entry-title">No case</span>
+          <span id="entry-date"></span>
+        </div>
+        <div id="entry-sub" class="entry-sub">No case claimed.</div>
+        <div class="mini-grid">
+          <div class="mini"><b>Yr</b><span id="entry-year"></span></div>
+          <div class="mini"><b>Role</b><span id="entry-role"></span></div>
+          <div class="mini"><b>Pt</b><span id="entry-patient"></span></div>
+          <div class="mini"><b>Conf</b><span id="entry-confidence"></span></div>
+        </div>
+        <div id="entry-source" class="source-line"></div>
+        <div id="entry-details" class="entry-details"></div>
+        <button id="details" type="button">Details</button>
+      </div>
+      <div class="buttons">
+        <button id="back" class="transport" title="Previous case" aria-label="Previous case">⏮</button>
+        <button id="claim" class="primary transport" title="Next case" aria-label="Next case">⏭</button>
+        <button id="fill">Fill</button>
+        <button id="submitted">Submit</button>
+      </div>
+      <div id="status"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "resident": {
+    "name": "Cody Key",
+    "aliases": [
+      "Cody Key",
+      "Cody R Key",
+      "Key, Cody"
+    ],
+    "expected_graduation_year": 2026,
+    "pgy_max": 5
+  },
+  "defaults": {
+    "site": "University of California (Davis) Medical Center",
+    "case_class": "Interventional Procedures",
+    "pediatric_age_cutoff": 18,
+    "academic_year_start_month": 7,
+    "academic_year_start_day": 1,
+    "case_id_source": "Accession Number",
+    "case_date_source": "Study Date"
+  },
+  "role": {
+    "primary_label": "Primary",
+    "secondary_label": "Secondary",
+    "ignored_label": "Assisting"
+  }
+}
