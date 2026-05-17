@@ -24,7 +24,7 @@ from app.matching import match_tokens
 from app.mapper import load_mapping_rules, map_source_case
 from app.models import init_db
 from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row, transform_source_row
-from app.review_queue import load_next_candidate_group, remap_unresolved_cases
+from app.review_queue import best_report_context_for_source, load_next_candidate_group, remap_unresolved_cases
 from app.upload_queue import (
     claim_next,
     claim_next_group,
@@ -61,8 +61,10 @@ class CoreTests(unittest.TestCase):
             "Study Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
         }
         source = transform_source_row(raw)
+        parsed = json.loads(source["parsed_report_json"])
         self.assertEqual(source["derived"]["role"], "Primary")
         self.assertEqual(source["derived"]["role_confidence"], "high")
+        self.assertEqual(parsed["procedure_title"], "Venous port placement")
         rules, rules_hash = load_mapping_rules()
         entries, update = map_source_case(source, rules, rules_hash)
         self.assertEqual(update["source_mapping_status"], "generated")
@@ -231,6 +233,87 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Nephroureteral tube exchange", bullets)
         self.assertEqual(parsed["procedure_summary_sections"][0]["additional_procedures"], [])
         self.assertNotIn("missing_procedure_summary", parsed["parse_warnings"])
+
+    def test_report_parser_handles_inline_impression_in_visage_snippet(self) -> None:
+        report = (
+            "Cody Key, MD. IMPRESSION: SUCCESSFUL PLACEMENT OF A RIGHT CHEST 8F SINGLE LUMEN POWERPORT "
+            "VIA THE RIGHT INTERNAL JUGULAR VEIN. THE CATHETER IS READY FOR IMMEDIATE USE."
+        )
+        parsed = parse_mpower_report(report, ["Cody Key"])
+        self.assertEqual(
+            parsed["impression"],
+            "SUCCESSFUL PLACEMENT OF A RIGHT CHEST 8F SINGLE LUMEN POWERPORT VIA THE RIGHT INTERNAL JUGULAR VEIN. THE CATHETER IS READY FOR IMMEDIATE USE.",
+        )
+        self.assertEqual(parsed["procedure_title"], "")
+        self.assertNotIn("missing_impression", parsed["parse_warnings"])
+        self.assertIn("THE CATHETER IS READY FOR IMMEDIATE USE.", parsed["candidate_procedure_phrases"][0])
+
+    def test_report_parser_handles_inline_procedure_summary_in_visage_snippet(self) -> None:
+        report = (
+            "Resident physician(s): Cody Key M.D. PROCEDURE SUMMARY: - Target organ: Left kidney "
+            "- Image-guided heat-based ablation - Additional procedure(s): Fine-needle aspiration biopsy."
+        )
+        parsed = parse_mpower_report(report, ["Cody Key"])
+        summaries = parsed["procedure_summary_sections"]
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(parsed["procedure_title"], "")
+        self.assertIn("Target organ: Left kidney", summaries[0]["bullets"])
+        self.assertIn("Image-guided heat-based ablation", summaries[0]["bullets"])
+        self.assertEqual(summaries[0]["additional_procedures"], ["Fine-needle aspiration biopsy."])
+        self.assertNotIn("missing_procedure_summary", parsed["parse_warnings"])
+
+    def test_report_context_prefers_richer_duplicate_accession_report(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        accession = "202604221898"
+        short_source = transform_source_row(
+            {
+                "Accession Number": accession,
+                "Exam Code": "IRBIOPSY",
+                "Institution Name": "UC Davis Health",
+                "Patient Birth Date": datetime(1980, 1, 1),
+                "Principal Result Interpreter": "25727^VU^CATHERINE",
+                "Report Snippet": (
+                    "PROCEDURE: Ultrasound-guided biopsy Date of service: 4/22/2026 1:00 PM "
+                    "Procedural Personnel Attending physician(s): Catherine Vu, MD"
+                ),
+                "Study Date": "2026-04-22T13:00:00.0000000-07:00",
+                "Study Description": "US GUIDED NEEDLE PLACEMENT WITH RADIOLOGIST",
+            }
+        )
+        full_source = transform_mpower_row(
+            {
+                "Accession Number": accession,
+                "Modality": "US",
+                "Exam Code": "IRBIOPSY",
+                "Exam Description": "US GUIDED NEEDLE PLACEMENT WITH RADIOLOGIST",
+                "CPT Code": "",
+                "Report Text": (
+                    "PROCEDURE: Ultrasound-guided biopsy\n\n"
+                    "IMPRESSION:\n\n"
+                    "Ultrasound-guided non-targeted biopsy of left renal cortex with specimen(s)\n"
+                    "sent to pathology.\n\n"
+                    "Plan:\n"
+                    "Postprocedural monitoring.\n\n"
+                    "PROCEDURE SUMMARY:\n"
+                    "- Percutaneous US-guided coaxial core needle biopsy\n"
+                    "- Additional procedure(s): None\n\n"
+                    "PROCEDURE DETAILS:\n"
+                    "Details omitted.\n"
+                ),
+                "Patient Age": "46",
+                "Exam Started Date": "2026-04-22 13:00:00-07:00",
+                "Report Finalized By": "Vu, Catherine",
+            }
+        )
+        short_id, _ = insert_source_case(conn, short_source, "visage.xlsx", 1)
+        full_id, _ = insert_source_case(conn, full_source, "mpower.csv", 1)
+        short_row = conn.execute("SELECT * FROM source_cases WHERE id = ?", (short_id,)).fetchone()
+        context = best_report_context_for_source(conn, short_row)
+        self.assertEqual(context["source_case_id"], full_id)
+        self.assertIn("left renal cortex", context["parsed"]["impression"])
+        self.assertEqual(len(context["parsed"]["procedure_summary_sections"]), 1)
 
     def test_mpower_role_ignores_other_outside_personnel_section(self) -> None:
         report = (

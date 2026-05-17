@@ -90,6 +90,19 @@ PERSONNEL_END_RE = re.compile(
     re.I | re.M,
 )
 
+INLINE_SECTION_STOP_RE = re.compile(
+    r"\s+(?:"
+    r"PROCEDURE DETAILS|PROCEDURE COMMENTS AND FINDINGS|Attestation|Additional Details|"
+    r"Pre-procedure|Post-procedure diagnosis|Preoperative diagnosis|PREOPERATIVE DIAGNOSIS|"
+    r"POST-OPERATIVE DIAGNOSIS|Indication|Additional clinical history|TECHNIQUE|FINDINGS|"
+    r"COMPLICATIONS|CLINICAL HISTORY|SEDATION|ANESTHESIA|ACCESS/CLOSURE|Radiation Dose|Contrast|"
+    r"Preliminary Report|Preliminary Report Electronically Signed By|Final Report Electronically Signed By|"
+    r"Attending note|ATTENDING PRESENCE|I have personally reviewed|Signer Name|Final Report|"
+    r"IMPRESSION|FINDINGS/IMPRESSION|[A-Z0-9 /()\-]+ PROCEDURE SUMMARY"
+    r")\s*:?",
+    re.I,
+)
+
 TITLE_LIKE_RE = re.compile(
     r"\b(?:GUIDED|ULTRASOUND|PARACENTESIS|THORACENTESIS|NEEDLE|BIOPSY|MYELO|ARTHROGRAM|"
     r"ANGIO|EMBOL|DRAIN|TUBE|CATHETER|PORT|FILTER|TIPS|THROMB|SCLEROTHERAPY)\b",
@@ -161,10 +174,17 @@ def _section_after_heading(text: str, heading: str) -> str:
     match = pattern.search(text)
     if not match:
         inline = re.search(rf"^\s*{heading}\s*:\s*(.*?)$", text, re.I | re.M)
-        if not inline:
-            return ""
-        start = inline.end()
-        first = inline.group(1).strip()
+        if inline:
+            start = inline.end()
+            first = inline.group(1).strip()
+        else:
+            inline_midline = re.search(rf"\b{heading}\s*:\s*", text, re.I)
+            if not inline_midline:
+                return ""
+            start = inline_midline.end()
+            stop = INLINE_SECTION_STOP_RE.search(text, start)
+            body = text[start : stop.start() if stop else len(text)]
+            return _clean_inline_section_body(body)
     else:
         start = match.end()
         first = ""
@@ -176,6 +196,15 @@ def _section_after_heading(text: str, heading: str) -> str:
             break
         lines.append(line)
     return "\n".join(line for line in lines if line)
+
+
+def _clean_inline_section_body(value: str) -> str:
+    lines: list[str] = []
+    for line in _nonblank_lines(value):
+        if _is_report_footer_line(line):
+            break
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _extract_impression(text: str) -> str:
@@ -211,7 +240,7 @@ def _extract_procedure_title(text: str) -> tuple[str, list[str], str]:
     for idx, line in enumerate(lines):
         proc_match = re.match(r"^PROCEDURE\s*:\s*(.*)$", line, re.I)
         if proc_match:
-            inline = proc_match.group(1).strip()
+            inline = _trim_inline_procedure_title(proc_match.group(1))
             if inline:
                 return _clean_line(inline), [], "procedure_label"
             items = _extract_procedure_list(lines, idx + 1)
@@ -219,16 +248,52 @@ def _extract_procedure_title(text: str) -> tuple[str, list[str], str]:
 
         procs_match = re.match(r"^PROCEDURES\s*:\s*(.*)$", line, re.I)
         if procs_match:
-            inline = procs_match.group(1).strip()
+            inline = _trim_inline_procedure_title(procs_match.group(1))
             items = [p.strip() for p in re.split(r"\s*,\s*", inline) if p.strip()] if inline else []
             items.extend(_extract_procedure_list(lines, idx + 1))
             return "; ".join(items) if items else inline, items, "procedures_label"
 
-    first = lines[0]
+    first = _trim_inline_procedure_title(lines[0])
+    if not first:
+        return "", [], "missing"
+    if _looks_like_personnel_fragment(first):
+        return "", [], "missing"
     if not re.match(r"^DATE\b", first, re.I) and TITLE_LIKE_RE.search(first):
         return _clean_line(first), [], "first_line_title"
 
     return _clean_line(first), [], "first_line_fallback"
+
+
+def _looks_like_personnel_fragment(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:"
+            r"Resident physician\(s\)|Attending physician\(s\)|Fellow physician\(s\)|"
+            r"Advanced practice provider\(s\)|Other|Cody Key|M\.D\.|MD"
+            r")\b",
+            value,
+            re.I,
+        )
+    )
+
+
+def _trim_inline_procedure_title(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    stop = re.search(
+        r"\s+(?:"
+        r"Date(?: of service| of procedure| of procedure/surgery)?|"
+        r"EXAM DATE|Procedural Personnel|PROCEDURE PERSONNEL|"
+        r"Resident physician\(s\)|Attending physician\(s\)|IMPRESSION|FINDINGS/IMPRESSION|"
+        r"[A-Z0-9 /()\-]+ PROCEDURE SUMMARY"
+        r")\s*:?",
+        value,
+        re.I,
+    )
+    if stop:
+        value = value[: stop.start()]
+    return _clean_line(value)
 
 
 def _extract_procedure_summaries(text: str) -> list[dict[str, Any]]:
@@ -257,7 +322,47 @@ def _extract_procedure_summaries(text: str) -> list[dict[str, Any]]:
                 "additional_procedures": additional,
             }
         )
+    inline_pattern = re.compile(r"\b([A-Z0-9 /()\-]*PROCEDURE SUMMARY)\s*:\s*", re.I)
+    for match in inline_pattern.finditer(text):
+        if any(existing.start() <= match.start() <= existing.end() for existing in matches):
+            continue
+        start = match.end()
+        stop = INLINE_SECTION_STOP_RE.search(text, start)
+        body = text[start : stop.start() if stop else len(text)]
+        lines = _inline_summary_lines(body)
+        if not lines:
+            continue
+        bullets = [_strip_bullet(line) for line in lines]
+        additional: list[str] = []
+        for line in lines:
+            m = re.match(r"^\s*-?\s*Additional procedure\(s\)\s*:\s*(.+)$", line, re.I)
+            if m:
+                value = _clean_line(m.group(1))
+                if value and value.lower() not in {"none", "n/a", "na"}:
+                    additional.extend(v.strip() for v in re.split(r"\s*,\s*", value) if v.strip())
+        summaries.append(
+            {
+                "heading": _clean_line(match.group(1)),
+                "lines": lines,
+                "bullets": bullets,
+                "additional_procedures": additional,
+            }
+        )
     return summaries
+
+
+def _inline_summary_lines(value: str) -> list[str]:
+    normalized = _clean_line(value)
+    if not normalized:
+        return []
+    if normalized.startswith("-"):
+        normalized = normalized[1:].strip()
+    parts = [
+        part.strip()
+        for part in re.split(r"\s+-\s*", normalized)
+        if part.strip()
+    ]
+    return [part for part in parts if not _is_report_footer_line(part)]
 
 
 def _extract_personnel_section(text: str) -> str:
@@ -477,7 +582,9 @@ def transform_source_row(raw: dict[str, Any], resident_profile: dict[str, Any] |
     role_meta = parse_role_metadata(raw.get("Report Snippet"), resident.get("aliases", []))
     flags = review_flags(raw.get("Report Snippet"))
     study_dt = parse_study_datetime(raw["Study Date"])
-    procedure_text = extract_procedure_text(raw.get("Report Snippet")) or str(raw.get("Study Description") or "")
+    report_snippet = str(raw.get("Report Snippet") or "")
+    parsed = parse_mpower_report(report_snippet, resident.get("aliases", []))
+    procedure_text = extract_procedure_text(report_snippet) or parsed.get("procedure_title") or str(raw.get("Study Description") or "")
     return {
         "accession_number": str(raw.get("Accession Number") or "").strip(),
         "study_date": study_dt.isoformat(),
@@ -485,7 +592,7 @@ def transform_source_row(raw: dict[str, Any], resident_profile: dict[str, Any] |
         "patient_age_years": None,
         "exam_code": str(raw.get("Exam Code") or "").strip(),
         "study_description": str(raw.get("Study Description") or "").strip(),
-        "report_snippet": str(raw.get("Report Snippet") or ""),
+        "report_snippet": report_snippet,
         "procedure_text": procedure_text,
         "institution_name": str(raw.get("Institution Name") or "").strip(),
         "source_format": "visage_xlsx",
@@ -493,7 +600,7 @@ def transform_source_row(raw: dict[str, Any], resident_profile: dict[str, Any] |
         "modality": str(raw.get("Modality") or raw.get("Modalities DICOM") or "").strip(),
         "cpt_code": "",
         "duplicate_accession_flag": 0,
-        "parsed_report_json": None,
+        "parsed_report_json": json.dumps(parsed, ensure_ascii=False, sort_keys=True),
         "principal_result_interpreter_raw": str(raw.get("Principal Result Interpreter") or "").strip(),
         "attending_name": parse_principal_result_interpreter(raw.get("Principal Result Interpreter")),
         "source_row_hash": row_hash(raw),

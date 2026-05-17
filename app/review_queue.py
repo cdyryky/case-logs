@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -67,6 +68,65 @@ def source_row_to_mapping_source(row: sqlite3.Row, profile: dict[str, Any] | Non
             "case_class": defaults.get("case_class", DEFAULT_CASE_CLASS),
         },
     }
+
+
+def parse_report_context_json(value: object) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def report_context_score(parsed: dict[str, Any], raw_text: object = "") -> int:
+    if not parsed:
+        return 0
+    score = min(len(str(raw_text or "")), 5000)
+    if parsed.get("procedure_title"):
+        score += 100
+    if parsed.get("impression"):
+        score += 5000
+    score += 3000 * len(parsed.get("procedure_summary_sections") or [])
+    score += 50 * len(parsed.get("candidate_procedure_phrases") or [])
+    return score
+
+
+def best_report_context_for_source(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    parsed = parse_report_context_json(row["parsed_report_json"] if "parsed_report_json" in row.keys() else None)
+    raw_text = row["report_snippet"] if "report_snippet" in row.keys() else ""
+    best = {
+        "parsed": parsed,
+        "raw_text": raw_text or "",
+        "source_case_id": row["id"] if "id" in row.keys() else None,
+        "source_format": row["source_format"] if "source_format" in row.keys() else "",
+    }
+    best_score = report_context_score(parsed, raw_text)
+    accession = row["accession_number"] if "accession_number" in row.keys() else ""
+    if not accession:
+        return best
+    siblings = conn.execute(
+        """
+        SELECT id, source_format, report_snippet, parsed_report_json
+        FROM source_cases
+        WHERE accession_number = ?
+        """,
+        (accession,),
+    ).fetchall()
+    for sibling in siblings:
+        sibling_parsed = parse_report_context_json(sibling["parsed_report_json"])
+        sibling_raw = sibling["report_snippet"] or ""
+        sibling_score = report_context_score(sibling_parsed, sibling_raw)
+        if sibling_score > best_score:
+            best = {
+                "parsed": sibling_parsed,
+                "raw_text": sibling_raw,
+                "source_case_id": sibling["id"],
+                "source_format": sibling["source_format"] or "",
+            }
+            best_score = sibling_score
+    return best
 
 
 def review_counts(conn: sqlite3.Connection) -> dict[str, int]:

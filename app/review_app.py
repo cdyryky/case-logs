@@ -16,7 +16,9 @@ from app.export_payload import export_approved_json
 from app.importer import import_mpower_csv, import_xlsx
 from app.learning import append_learned_rule, apply_mapping_to_matching_unsubmitted, learned_rule_count
 from app.models import connect, init_db, log_event, utc_now
+from app.parser import parse_mpower_report
 from app.review_queue import (
+    best_report_context_for_source,
     load_next_candidate_group,
     load_next_generated_group,
     load_next_unmapped,
@@ -92,6 +94,17 @@ def parse_report_json(value: object) -> dict[str, Any]:
     except (TypeError, json.JSONDecodeError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def parsed_report_for_source(source: sqlite3.Row) -> dict[str, Any]:
+    parsed = parse_report_json(source["parsed_report_json"] if "parsed_report_json" in source.keys() else None)
+    if parsed:
+        return parsed
+    raw_text = source["report_snippet"] if "report_snippet" in source.keys() else ""
+    if not raw_text:
+        return {}
+    profile = load_resident_profile()
+    return parse_mpower_report(raw_text, profile["resident"].get("aliases", []))
 
 
 def compact_lines(value: object, limit: int = 4) -> str:
@@ -337,10 +350,11 @@ def default_values_for_source(source: sqlite3.Row) -> dict[str, object]:
     }
 
 
-def source_context(source: sqlite3.Row) -> None:
+def source_context(conn: sqlite3.Connection, source: sqlite3.Row) -> None:
     mapping_source = source_row_to_mapping_source(source)
     derived = mapping_source["derived"]
-    parsed = parse_report_json(source["parsed_report_json"] if "parsed_report_json" in source.keys() else None)
+    report_context = best_report_context_for_source(conn, source)
+    parsed = report_context["parsed"] or parsed_report_for_source(source)
     st.subheader(f"{source['procedure_text'] or source['study_description'] or 'Unlabeled case'}")
     c1, c2, c3, c4 = st.columns(4)
     c1.caption("Date")
@@ -357,20 +371,21 @@ def source_context(source: sqlite3.Row) -> None:
     if source["needs_review_reason"]:
         st.warning(source["needs_review_reason"])
     st.markdown("**Report context**")
-    warnings = parsed.get("parse_warnings") or [] if parsed else ["parsed_report_missing"]
-    status = "Parsed report available" if parsed else "Parsed report missing"
-    if warnings:
-        status = f"{status}; warnings: {', '.join(str(item) for item in warnings)}"
-    st.caption(status)
+    if not parsed:
+        st.caption("Parsed report missing; warnings: parsed_report_missing")
+    else:
+        visible_warnings = [
+            str(item)
+            for item in parsed.get("parse_warnings") or []
+            if item not in {"missing_impression", "missing_procedure_summary", "missing_personnel_section", "personnel_role_low_confidence"}
+        ]
+        if visible_warnings:
+            st.caption(f"Parsed report warnings: {', '.join(visible_warnings)}")
     if parsed.get("procedure_title"):
         st.write(f"Procedure title: {parsed['procedure_title']}")
-    else:
-        st.caption("No parsed procedure title.")
     if parsed.get("impression"):
         st.caption("Impression")
         st.text(parsed["impression"])
-    else:
-        st.caption("No parsed impression.")
     summaries = parsed.get("procedure_summary_sections") or []
     if summaries:
         st.caption("Procedure summary")
@@ -385,16 +400,12 @@ def source_context(source: sqlite3.Row) -> None:
             if additional:
                 st.write("Additional procedures:")
                 st.markdown("\n".join(f"- {line}" for line in additional))
-    else:
-        st.caption("No parsed procedure summary.")
     candidates = parsed.get("candidate_procedure_phrases") or []
     if candidates:
         st.caption("Candidate procedure phrases")
         st.markdown("\n".join(f"- {phrase}" for phrase in candidates[:20]))
-    else:
-        st.caption("No candidate procedure phrases.")
     needs_raw = not parsed or not parsed.get("impression") or not summaries
-    raw_text = source["report_snippet"] if "report_snippet" in source.keys() else ""
+    raw_text = report_context["raw_text"] or (source["report_snippet"] if "report_snippet" in source.keys() else "")
     if raw_text:
         with st.expander("Raw report text", expanded=needs_raw):
             st.text(raw_text)
@@ -496,12 +507,19 @@ def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candida
     elif query:
         st.caption("No official ACGME targets matched that search.")
 
-    if st.button("Approve checked", type="primary", key=f"approve_candidates_{source['id']}"):
-        if checked_results:
-            selected_ids.update(add_manual_candidates(conn, int(source["id"]), checked_results))
-        inserted = approve_candidate_review(conn, int(source["id"]), selected_ids)
-        st.success(f"Approved {len(selected_ids)} mappings; created {inserted} new entries.")
-        st.rerun()
+    approve_col, skip_col = st.columns(2)
+    with approve_col:
+        if st.button("Approve checked", type="primary", key=f"approve_candidates_{source['id']}"):
+            if checked_results:
+                selected_ids.update(add_manual_candidates(conn, int(source["id"]), checked_results))
+            inserted = approve_candidate_review(conn, int(source["id"]), selected_ids)
+            st.success(f"Approved {len(selected_ids)} mappings; created {inserted} new entries.")
+            st.rerun()
+    with skip_col:
+        if st.button("Skip this case", key=f"skip_candidates_{source['id']}"):
+            approve_candidate_review(conn, int(source["id"]), set())
+            st.success("Skipped this case.")
+            st.rerun()
 
 
 def mapping_form(
@@ -669,7 +687,7 @@ with tab_review:
         if not source:
             st.info("No candidate mappings need review.")
         else:
-            source_context(source)
+            source_context(conn, source)
             candidate_review_card(conn, source, candidates)
 
             legacy_source, entries = load_next_generated_group(conn)
@@ -695,7 +713,7 @@ with tab_review:
         if not source:
             st.info("No source cases in this queue.")
         else:
-            source_context(source)
+            source_context(conn, source)
             defaults = default_values_for_source(source)
             if suggestions:
                 st.caption("Suggested ACGME targets")
