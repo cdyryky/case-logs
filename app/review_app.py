@@ -13,7 +13,7 @@ from app.config_io import load_resident_profile
 from app.constants import DEFAULT_CASE_CLASS, DEFAULT_DB_PATH, DEFAULT_SITE
 from app.candidates import add_manual_candidates, approve_candidate_review, search_acgme_targets
 from app.export_payload import export_approved_json
-from app.importer import import_mpower_csv, import_xlsx
+from app.importer import import_mpower_csv
 from app.learning import append_learned_rule, apply_mapping_to_matching_unsubmitted, learned_rule_count
 from app.models import connect, init_db, log_event, utc_now
 from app.parser import parse_mpower_report
@@ -404,10 +404,9 @@ def source_context(conn: sqlite3.Connection, source: sqlite3.Row) -> None:
     if candidates:
         st.caption("Candidate procedure phrases")
         st.markdown("\n".join(f"- {phrase}" for phrase in candidates[:20]))
-    needs_raw = not parsed or not parsed.get("impression") or not summaries
     raw_text = report_context["raw_text"] or (source["report_snippet"] if "report_snippet" in source.keys() else "")
     if raw_text:
-        with st.expander("Raw report text", expanded=needs_raw):
+        with st.expander("Raw report text", expanded=False):
             st.text(raw_text)
 
 
@@ -617,7 +616,7 @@ conn = get_conn()
 with st.sidebar:
     st.header("Import")
     import_path = st.text_input("Default mPower CSV", DEFAULT_MPOWER_CSV_PATH)
-    uploaded = st.file_uploader("Optional alternate import file", type=["csv", "xlsx"])
+    uploaded = st.file_uploader("Optional alternate import file", type=["csv"])
     if st.button("Import mPower CSV", type="primary"):
         path: str | Path
         if uploaded:
@@ -628,8 +627,7 @@ with st.sidebar:
         else:
             path = import_path
         with st.spinner("Importing and mapping cases..."):
-            suffix = Path(path).suffix.lower()
-            summary = import_mpower_csv(conn, path) if suffix == ".csv" else import_xlsx(conn, path)
+            summary = import_mpower_csv(conn, path)
             conn.commit()
         st.success(f"Imported {summary['row_count']} rows; generated {summary['generated_entries_count']} entries.")
 

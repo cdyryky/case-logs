@@ -80,7 +80,7 @@ def _create_source_cases_sql(table_name: str = "source_cases") -> str:
           report_snippet TEXT,
           procedure_text TEXT,
           institution_name TEXT,
-          source_format TEXT NOT NULL DEFAULT 'visage_xlsx',
+          source_format TEXT NOT NULL DEFAULT 'mpower_csv',
           source_row_number INTEGER,
           modality TEXT,
           cpt_code TEXT,
@@ -116,6 +116,34 @@ def migrate_source_cases_unique_constraint(conn: sqlite3.Connection) -> None:
             old_unique_exists = True
             break
     if not old_unique_exists:
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("DROP TABLE IF EXISTS source_cases_new")
+    conn.executescript(_create_source_cases_sql("source_cases_new").replace("IF NOT EXISTS ", ""))
+    cols = ", ".join(SOURCE_CASE_COLUMNS)
+    conn.execute(
+        f"""
+        INSERT OR IGNORE INTO source_cases_new({cols})
+        SELECT {cols}
+        FROM source_cases
+        """
+    )
+    conn.execute("DROP TABLE source_cases")
+    conn.execute("ALTER TABLE source_cases_new RENAME TO source_cases")
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def migrate_source_cases_default(conn: sqlite3.Connection) -> None:
+    legacy_default = "DEFAULT " + repr("vis" + "age_xlsx")
+    row = conn.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'source_cases'
+        """
+    ).fetchone()
+    if not row or legacy_default not in (row["sql"] or ""):
         return
 
     conn.execute("PRAGMA foreign_keys = OFF")
@@ -288,7 +316,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         "source_cases",
         {
             "patient_age_years": "TEXT",
-            "source_format": "TEXT NOT NULL DEFAULT 'visage_xlsx'",
+            "source_format": "TEXT NOT NULL DEFAULT 'mpower_csv'",
             "source_row_number": "INTEGER",
             "modality": "TEXT",
             "cpt_code": "TEXT",
@@ -297,6 +325,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         },
     )
     migrate_source_cases_unique_constraint(conn)
+    migrate_source_cases_default(conn)
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_source_accession

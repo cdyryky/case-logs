@@ -7,7 +7,7 @@ from typing import Any
 from .config_io import load_resident_profile
 from .mapper import load_mapping_rules, map_source_case, validate_rules
 from .models import init_db, log_event, utc_now
-from .parser import iter_mpower_raw_rows, iter_raw_rows, transform_mpower_row, transform_source_row
+from .parser import iter_mpower_raw_rows, transform_mpower_row
 from .utils import file_sha256
 
 
@@ -83,7 +83,7 @@ def insert_source_case(
     inserted = cur.rowcount == 1
     if inserted:
         return int(cur.lastrowid), True
-    source_format = source.get("source_format") or "visage_xlsx"
+    source_format = source.get("source_format") or "mpower_csv"
     row = conn.execute(
         """
         SELECT id FROM source_cases
@@ -148,51 +148,6 @@ def insert_generated_entries(
             entry_id = conn.execute("SELECT id FROM generated_entries WHERE dedupe_key = ?", (entry["dedupe_key"],)).fetchone()["id"]
             log_event(conn, entry_id, "generated", None, entry["review_status"], "importer", entry["mapping_rule_name"])
     return count
-
-
-def import_xlsx(conn: sqlite3.Connection, xlsx_path: str | Path) -> dict[str, int | str]:
-    init_db(conn)
-    path = Path(xlsx_path)
-    profile = load_resident_profile()
-    rules, rules_hash = load_mapping_rules()
-    validate_rules(rules)
-    file_hash = file_sha256(path)
-    import_cur = conn.execute(
-        """
-        INSERT INTO imports(filename, file_hash, imported_at, row_count, new_source_cases, duplicate_source_cases, generated_entries_count)
-        VALUES (?, ?, ?, 0, 0, 0, 0)
-        """,
-        (path.name, file_hash, utc_now()),
-    )
-    import_id = int(import_cur.lastrowid)
-    row_count = new_count = duplicate_count = generated_count = 0
-
-    for raw in iter_raw_rows(path):
-        row_count += 1
-        source = transform_source_row(raw, profile)
-        source_case_id, inserted = insert_source_case(conn, source, path.name, import_id)
-        new_count += int(inserted)
-        duplicate_count += int(not inserted)
-        entries, source_update = map_source_case(source, rules, rules_hash, validate=False)
-        update_source_mapping_status(conn, source_case_id, source_update)
-        generated_count += insert_generated_entries(conn, source_case_id, entries)
-
-    conn.execute(
-        """
-        UPDATE imports
-        SET row_count = ?, new_source_cases = ?, duplicate_source_cases = ?, generated_entries_count = ?
-        WHERE id = ?
-        """,
-        (row_count, new_count, duplicate_count, generated_count, import_id),
-    )
-    log_event(conn, None, "imported", None, None, "importer", f"{path.name}: {row_count} rows")
-    return {
-        "import_id": import_id,
-        "row_count": row_count,
-        "new_source_cases": new_count,
-        "duplicate_source_cases": duplicate_count,
-        "generated_entries_count": generated_count,
-    }
 
 
 def import_mpower_csv(conn: sqlite3.Connection, csv_path: str | Path) -> dict[str, int | str]:

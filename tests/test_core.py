@@ -23,7 +23,7 @@ from app.importer import import_mpower_csv, insert_generated_entries, insert_sou
 from app.matching import match_tokens
 from app.mapper import load_mapping_rules, map_source_case
 from app.models import init_db
-from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row, transform_source_row
+from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row
 from app.review_queue import best_report_context_for_source, load_next_candidate_group, remap_unresolved_cases
 from app.upload_queue import (
     claim_next,
@@ -34,6 +34,25 @@ from app.upload_queue import (
     update_upload_status,
 )
 from app.utils import case_year_from_date, format_acgme_date, patient_type
+
+
+def transform_report_fixture(raw: dict[str, object]) -> dict[str, object]:
+    report_text = str(raw.get("Report Snippet") or "")
+    if "Cody Key" in report_text and "Procedural Personnel" not in report_text and "PROCEDURE PERSONNEL" not in report_text:
+        report_text = f"{report_text}\n\nProcedural Personnel\nResident physician(s): Cody Key, MD\n"
+    return transform_mpower_row(
+        {
+            "Accession Number": raw.get("Accession Number"),
+            "Modality": raw.get("Modality") or raw.get("Modalities DICOM") or "IR",
+            "Exam Code": raw.get("Exam Code"),
+            "Exam Description": raw.get("Study Description"),
+            "CPT Code": raw.get("CPT Code") or "",
+            "Report Text": report_text,
+            "Patient Age": raw.get("Patient Age") or "46",
+            "Exam Started Date": raw.get("Study Date"),
+            "Report Finalized By": raw.get("Report Finalized By") or "Attending, Example",
+        }
+    )
 
 
 class CoreTests(unittest.TestCase):
@@ -56,11 +75,23 @@ class CoreTests(unittest.TestCase):
             "Institution Name": "UC Davis Health",
             "Patient Birth Date": datetime(1981, 12, 8),
             "Principal Result Interpreter": "25727^MORSHEDI^MAUD^MOSTAFA",
-            "Report Snippet": "PROCEDURE: Venous port placement Date of service: 5/15/2026 Resident physician(s): Cody Key, MD Advanced practice provider(s): None",
+            "Report Snippet": (
+                "PROCEDURE: Venous port placement\n\n"
+                "Procedural Personnel\n"
+                "Attending physician(s): Example Attending, MD\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful venous port placement.\n\n"
+                "PROCEDURE SUMMARY:\n"
+                "- Venous port placement\n"
+                "- Additional procedure(s): None\n\n"
+                "PROCEDURE DETAILS:\n"
+                "Details omitted.\n"
+            ),
             "Study Date": "2026-05-15T09:57:03.0000000-07:00",
             "Study Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
         }
-        source = transform_source_row(raw)
+        source = transform_report_fixture(raw)
         parsed = json.loads(source["parsed_report_json"])
         self.assertEqual(source["derived"]["role"], "Primary")
         self.assertEqual(source["derived"]["role_confidence"], "high")
@@ -234,7 +265,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(parsed["procedure_summary_sections"][0]["additional_procedures"], [])
         self.assertNotIn("missing_procedure_summary", parsed["parse_warnings"])
 
-    def test_report_parser_handles_inline_impression_in_visage_snippet(self) -> None:
+    def test_report_parser_handles_inline_impression_in_report_text(self) -> None:
         report = (
             "Cody Key, MD. IMPRESSION: SUCCESSFUL PLACEMENT OF A RIGHT CHEST 8F SINGLE LUMEN POWERPORT "
             "VIA THE RIGHT INTERNAL JUGULAR VEIN. THE CATHETER IS READY FOR IMMEDIATE USE."
@@ -248,7 +279,7 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("missing_impression", parsed["parse_warnings"])
         self.assertIn("THE CATHETER IS READY FOR IMMEDIATE USE.", parsed["candidate_procedure_phrases"][0])
 
-    def test_report_parser_handles_inline_procedure_summary_in_visage_snippet(self) -> None:
+    def test_report_parser_handles_inline_procedure_summary_in_report_text(self) -> None:
         report = (
             "Resident physician(s): Cody Key M.D. PROCEDURE SUMMARY: - Target organ: Left kidney "
             "- Image-guided heat-based ablation - Additional procedure(s): Fine-needle aspiration biopsy."
@@ -267,7 +298,7 @@ class CoreTests(unittest.TestCase):
         conn.row_factory = sqlite3.Row
         init_db(conn)
         accession = "202604221898"
-        short_source = transform_source_row(
+        short_source = transform_report_fixture(
             {
                 "Accession Number": accession,
                 "Exam Code": "IRBIOPSY",
@@ -307,7 +338,7 @@ class CoreTests(unittest.TestCase):
                 "Report Finalized By": "Vu, Catherine",
             }
         )
-        short_id, _ = insert_source_case(conn, short_source, "visage.xlsx", 1)
+        short_id, _ = insert_source_case(conn, short_source, "short-report.csv", 1)
         full_id, _ = insert_source_case(conn, full_source, "mpower.csv", 1)
         short_row = conn.execute("SELECT * FROM source_cases WHERE id = ?", (short_id,)).fetchone()
         context = best_report_context_for_source(conn, short_row)
@@ -837,7 +868,7 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-06-04T10:41:53.0000000-07:00",
             "Study Description": "IR PORT REMOVAL",
         }
-        source = transform_source_row(raw)
+        source = transform_report_fixture(raw)
         rules, rules_hash = load_mapping_rules()
         entries, _ = map_source_case(source, rules, rules_hash)
         self.assertEqual(len(entries), 1)
@@ -858,7 +889,7 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-06-04T10:41:53.0000000-07:00",
             "Study Description": "IR TUNNELED CATHETER REMOVAL",
         }
-        source = transform_source_row(raw)
+        source = transform_report_fixture(raw)
         rules, rules_hash = load_mapping_rules()
         entries, _ = map_source_case(source, rules, rules_hash)
         self.assertEqual(len(entries), 1)
@@ -877,7 +908,7 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-05-13T12:50:57-07:00",
             "Study Description": "IR IVC FILTER REMOVAL",
         }
-        source = transform_source_row(raw)
+        source = transform_report_fixture(raw)
         rules, rules_hash = load_mapping_rules()
         entries, update = map_source_case(source, rules, rules_hash)
         self.assertEqual(update["source_mapping_status"], "generated")
@@ -897,13 +928,42 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-03-03T11:35:44-08:00",
             "Study Description": "IR IVC FILTER PLACEMENT",
         }
-        source = transform_source_row(raw)
+        source = transform_report_fixture(raw)
         rules, rules_hash = load_mapping_rules()
         entries, update = map_source_case(source, rules, rules_hash)
         self.assertEqual(update["source_mapping_status"], "generated")
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["area"], "Venous Interventions")
         self.assertEqual(entries[0]["type"], "IVC filter placement")
+        self.assertEqual(entries[0]["acgme_def_category"], "Venous Intervention")
+
+    def test_venous_plasty_targets_venous_pta(self) -> None:
+        raw = {
+            "Accession Number": 202606070001,
+            "Exam Code": "IRVENOGRAM",
+            "Report Snippet": (
+                "PROCEDURE: Left iliac venoplasty\n\n"
+                "Procedural Personnel\n"
+                "Attending physician(s): Example Attending, MD\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful left iliac venoplasty.\n\n"
+                "PROCEDURE SUMMARY:\n"
+                "- Left iliac venoplasty\n"
+                "- Additional procedure(s): None\n\n"
+                "PROCEDURE DETAILS:\n"
+                "Details omitted.\n"
+            ),
+            "Study Date": "2026-06-07T10:41:53-07:00",
+            "Study Description": "IR VENOGRAPHY AND INTERVENTION",
+        }
+        source = transform_report_fixture(raw)
+        rules, rules_hash = load_mapping_rules()
+        entries, update = map_source_case(source, rules, rules_hash)
+        self.assertEqual(update["source_mapping_status"], "generated")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["area"], "Venous Interventions")
+        self.assertEqual(entries[0]["type"], "Venous PTA")
         self.assertEqual(entries[0]["acgme_def_category"], "Venous Intervention")
 
     def test_parenthetical_ivc_alias_normalization(self) -> None:
@@ -923,7 +983,7 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-06-01T10:41:53-07:00",
             "Study Description": "IR VENOUS PORT INSERTION",
         }
-        source = transform_source_row(raw)
+        source = transform_report_fixture(raw)
         rules, rules_hash = load_mapping_rules()
         entries, update = map_source_case(source, rules, rules_hash)
         self.assertEqual(entries, [])
@@ -942,7 +1002,7 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-05-13T10:41:53.0000000-07:00",
             "Study Description": "IR TRANSJUGULAR LIVER BIOPSY",
         }
-        source = transform_source_row(raw)
+        source = transform_report_fixture(raw)
         rules, rules_hash = load_mapping_rules()
         entries, _ = map_source_case(source, rules, rules_hash)
         self.assertEqual(len(entries), 1)
@@ -963,8 +1023,8 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-05-13T12:50:57-07:00",
             "Study Description": "IR IVC FILTER REMOVAL",
         }
-        source = transform_source_row(raw)
-        source_id, _ = insert_source_case(conn, source, "sample.xlsx", 1)
+        source = transform_report_fixture(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
         summary = remap_unresolved_cases(conn)
         self.assertEqual(summary["generated_entries"], 1)
         row = conn.execute("SELECT type FROM generated_entries WHERE source_case_id = ?", (source_id,)).fetchone()
@@ -984,8 +1044,8 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-05-15T09:57:03.0000000-07:00",
             "Study Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
         }
-        source = transform_source_row(raw)
-        source_id, _ = insert_source_case(conn, source, "sample.xlsx", 1)
+        source = transform_report_fixture(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
         rules, rules_hash = load_mapping_rules()
         entries, _ = map_source_case(source, rules, rules_hash)
         entries[0]["review_status"] = "approved"
@@ -1014,8 +1074,8 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-05-15T09:57:03.0000000-07:00",
             "Study Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
         }
-        source = transform_source_row(raw)
-        source_id, _ = insert_source_case(conn, source, "sample.xlsx", 1)
+        source = transform_report_fixture(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
         rules, rules_hash = load_mapping_rules()
         entries, _ = map_source_case(source, rules, rules_hash)
         entries[0]["review_status"] = "approved"
@@ -1071,8 +1131,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(submitted, 2)
 
         raw2 = {**raw, "Accession Number": 4}
-        source2 = transform_source_row(raw2)
-        source2_id, _ = insert_source_case(conn, source2, "sample.xlsx", 1)
+        source2 = transform_report_fixture(raw2)
+        source2_id, _ = insert_source_case(conn, source2, "sample.csv", 1)
         next_entry = {**entries[0], "dedupe_key": entries[0]["dedupe_key"] + "|next", "review_status": "approved"}
         insert_generated_entries(conn, source2_id, [next_entry])
         next_group = claim_next_group(conn)
@@ -1097,8 +1157,8 @@ class CoreTests(unittest.TestCase):
             "Study Date": "2026-05-15T09:57:03.0000000-07:00",
             "Study Description": "IR PORT REMOVAL",
         }
-        source = transform_source_row(raw)
-        source_id, _ = insert_source_case(conn, source, "sample.xlsx", 1)
+        source = transform_report_fixture(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
         db_source = conn.execute("SELECT * FROM source_cases WHERE id = ?", (source_id,)).fetchone()
         values = {
             "case_class": "Interventional Procedures",

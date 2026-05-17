@@ -62,7 +62,7 @@ def parse_study_datetime(value: Any) -> datetime:
         return datetime(value.year, value.month, value.day)
     text = str(value).strip()
     text = text.replace("Z", "+00:00")
-    # Python accepts up to 6 fractional digits; Visage exports may include 7.
+    # Python accepts up to 6 fractional digits; some exports include 7.
     text = re.sub(r"(\.\d{6})\d+([+-]\d\d:\d\d)$", r"\1\2", text)
     text = re.sub(r"(\.\d{6})\d+$", r"\1", text)
     return datetime.fromisoformat(text)

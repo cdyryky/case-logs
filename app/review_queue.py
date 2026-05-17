@@ -29,7 +29,7 @@ def source_row_to_mapping_source(row: sqlite3.Row, profile: dict[str, Any] | Non
         "report_snippet": row["report_snippet"] or "",
         "procedure_text": row["procedure_text"] or "",
         "institution_name": row["institution_name"] or "",
-        "source_format": row["source_format"] if "source_format" in row.keys() else "visage_xlsx",
+        "source_format": row["source_format"] if "source_format" in row.keys() else "mpower_csv",
         "source_row_number": row["source_row_number"] if "source_row_number" in row.keys() else None,
         "modality": row["modality"] if "modality" in row.keys() else "",
         "cpt_code": row["cpt_code"] if "cpt_code" in row.keys() else "",
