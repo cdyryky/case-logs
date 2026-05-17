@@ -1,8 +1,5 @@
 (() => {
-if (window.__ACGME_IR_CONTENT_SCRIPT_LOADED__) {
-  return;
-}
-window.__ACGME_IR_CONTENT_SCRIPT_LOADED__ = true;
+const CONTENT_SCRIPT_VERSION = "2026-05-15-targeted-delete-v2";
 
 const FIELD_LABELS = {
   case_id: ["Case ID", "Case Id", "CaseID", "Case Number", "Accession", "Accession Number"],
@@ -485,6 +482,11 @@ function selectedEntryKey(entry) {
   ].map(loose).join("|");
 }
 
+function groupPrimaryEntry(group) {
+  const code = group?.codes?.[0] || group;
+  return {...group, ...code};
+}
+
 function selectedRegions() {
   const headings = Array.from(document.querySelectorAll(".selectedCodes"));
   const regions = new Set();
@@ -523,18 +525,39 @@ function selectedPanelText() {
 
 function selectedCodeCards(entry) {
   const wantedType = normalize(entry.type);
+  const wantedDescription = normalize(entry.acgme_description);
+  const wantedArea = normalize(entry.area);
   const regions = selectedRegions();
   const cards = [];
   for (const region of regions) {
-    const candidates = Array.from(region.querySelectorAll("div, li, tr, td, section, article"))
+    const candidates = Array.from(region.querySelectorAll("div, li, tr, td, section, article, label, dl, dt, dd"))
       .filter(el => isVisible(el) && !el.closest("#codes-by-areatype-table"));
     for (const el of candidates) {
       const text = normalize(el.textContent || "");
-      if (!text || text.length < wantedType.length) continue;
-      if (text.includes(wantedType) || text.includes("type:")) cards.push(el);
+      if (!text) continue;
+      if (
+        (wantedDescription && text.includes(wantedDescription)) ||
+        (wantedType && text.includes(wantedType)) ||
+        (wantedArea && text.includes(wantedArea) && text.includes("type:"))
+      ) {
+        cards.push(el);
+      }
     }
   }
   return cards;
+}
+
+function selectedCodeCardContainers(entry) {
+  return selectedCodeCards(entry)
+    .map(card => (
+      card.closest("[class*='card']") ||
+      card.closest("[class*='item']") ||
+      card.closest("[class*='code']") ||
+      card.closest("li") ||
+      card.closest("tr") ||
+      card
+    ))
+    .filter(Boolean);
 }
 
 function selectedPanelHasEntry(entry) {
@@ -553,6 +576,155 @@ function selectedPanelHasEntry(entry) {
   if (cardTexts.some(text => text.includes(wantedArea) && text.includes(wantedType))) return true;
   const text = selectedPanelText();
   return text.includes(wantedType) && (!wantedArea || text.includes(wantedArea));
+}
+
+function removeButtonForSelectedCard(card) {
+  const containers = [
+    card,
+    card.parentElement,
+    card.closest("tr"),
+    card.closest("li"),
+    card.closest("[class*='card']"),
+    card.closest(".row"),
+    card.closest("[class*='row']"),
+    card.closest("[class*='item']"),
+    card.closest("[class*='code']")
+  ].filter(Boolean);
+
+  const controls = containers.flatMap(container =>
+    Array.from(container.querySelectorAll(
+      "button, a, i.removeCode, .removeCode, .fa-trash-can, input[type='button'], input[type='submit'], input[type='image'], input[type='checkbox'], [role='button']"
+    ))
+  )
+    .filter(isVisible);
+  return controls.find(el => {
+    const text = normalize(el.textContent || el.value || "");
+    const title = normalize(el.getAttribute("title") || el.getAttribute("aria-label") || "");
+    const cls = String(el.className || "").toLowerCase();
+    return text === "x" ||
+      text === "×" ||
+      text === "-" ||
+      text === "remove" ||
+      text.includes("remove") ||
+      text === "delete" ||
+      text.includes("delete") ||
+      title.includes("remove") ||
+      title.includes("delete") ||
+      (el.type === "checkbox" && el.checked) ||
+      cls.includes("remove") ||
+      cls.includes("delete") ||
+      cls.includes("close") ||
+      cls.includes("trash");
+  }) || null;
+}
+
+function isRemovalControl(el) {
+  const text = normalize(el.textContent || el.value || "");
+  const title = normalize(el.getAttribute("title") || el.getAttribute("aria-label") || "");
+  const cls = String(el.className || "").toLowerCase();
+  return text === "x" ||
+    text === "×" ||
+    text === "-" ||
+    text === "remove" ||
+    text.includes("remove") ||
+    text === "delete" ||
+    text.includes("delete") ||
+    title.includes("remove") ||
+    title.includes("delete") ||
+    (el.type === "checkbox" && el.checked) ||
+    cls.includes("removecode") ||
+    cls.includes("remove") ||
+    cls.includes("fa-trash-can") ||
+    cls.includes("delete") ||
+    cls.includes("close") ||
+    cls.includes("trash");
+}
+
+function selectedRemovalControls() {
+  const seen = new Set();
+  const controls = [];
+  for (const region of selectedRegions()) {
+    const found = Array.from(region.querySelectorAll(
+      "button, a, i.removeCode, .removeCode, .fa-trash-can, input[type='button'], input[type='submit'], input[type='image'], input[type='checkbox'], [role='button']"
+    ))
+      .filter(el => isVisible(el) && !el.closest("#codes-by-areatype-table") && isRemovalControl(el));
+    for (const el of found) {
+      if (seen.has(el)) continue;
+      seen.add(el);
+      controls.push(el);
+    }
+  }
+  return controls;
+}
+
+function trashButtonForSelectedCard(entry) {
+  const ranked = selectedCodeCardContainers(entry)
+    .map(card => ({card, score: removalScore(card, entry)}))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  for (const item of ranked) {
+    const button = removeButtonForSelectedCard(item.card);
+    if (button) return button;
+  }
+  return null;
+}
+
+async function clearSelectedCodes() {
+  clickTabByText("Area/Type/Code");
+  await nextFrame();
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const count = selectedCount();
+    const controls = selectedRemovalControls();
+    if (count === 0) {
+      ADDED_ENTRY_KEYS.clear();
+      return;
+    }
+    if (controls.length === 0) {
+      ADDED_ENTRY_KEYS.clear();
+      if (count && count > 0) {
+        throw new Error(`Could not find remove controls for ${count} selected ACGME code${count === 1 ? "" : "s"}.`);
+      }
+      return;
+    }
+    clickLikeUser(controls[0]);
+    ADDED_ENTRY_KEYS.clear();
+    await sleep(180);
+    await nextFrame();
+  }
+  const remaining = selectedCount();
+  if (remaining && remaining > 0) {
+    throw new Error(`Could not clear selected ACGME codes; ${remaining} still selected.`);
+  }
+}
+
+function removalScore(card, entry) {
+  const text = normalize(card.textContent || "");
+  const wantedType = normalize(entry.type);
+  const wantedDescription = normalize(entry.acgme_description);
+  const wantedArea = normalize(entry.area);
+  let score = 0;
+  if (wantedDescription && text.includes(wantedDescription)) score += 12;
+  if (wantedType && text.includes(wantedType)) score += 8;
+  if (wantedArea && text.includes(wantedArea)) score += 3;
+  return score;
+}
+
+async function removeSelectedCode(entry) {
+  clickTabByText("Area/Type/Code");
+  await nextFrame();
+  if (!selectedPanelHasEntry(entry)) {
+    return;
+  }
+  const button = trashButtonForSelectedCard(entry);
+  if (!button) {
+    throw new Error(`Could not safely remove deselected code: ${entry.area} / ${entry.type}`);
+  }
+  clickLikeUser(button);
+  ADDED_ENTRY_KEYS.delete(selectedEntryKey(entry));
+  const removed = await waitUntil(() => !selectedPanelHasEntry(entry), 1200, 50);
+  if (!removed && selectedPanelHasEntry(entry)) {
+    throw new Error(`Deselected code did not disappear after remove: ${entry.area} / ${entry.type}`);
+  }
 }
 
 async function waitForSelectedCodeAdded(beforeCount, entry) {
@@ -661,13 +833,45 @@ async function validate(entry, doHighlight = true) {
 }
 
 async function fill(entry) {
-  await validate(entry, false);
-  await fillMetadata(entry);
-  await selectCategory(entry);
-  const fields = {keyword: document.getElementById("Keyword") || null, comments: document.getElementById("Comments") || null};
-  if (entry.keyword && fields.keyword) setNativeValue(fields.keyword, entry.keyword);
-  if (entry.comments && fields.comments) setNativeValue(fields.comments, entry.comments);
-  showToast(`Filled case ${entry.case_id}. Review before submitting.`);
+  try {
+    await validate(entry, false);
+    await fillMetadata(entry);
+    await selectCategory(entry);
+    const fields = {keyword: document.getElementById("Keyword") || null, comments: document.getElementById("Comments") || null};
+    if (entry.keyword && fields.keyword) setNativeValue(fields.keyword, entry.keyword);
+    if (entry.comments && fields.comments) setNativeValue(fields.comments, entry.comments);
+    showToast(`Filled case ${entry.case_id}. Review before submitting.`);
+  } finally {
+    window.scrollTo({top: 0, behavior: "smooth"});
+  }
+}
+
+async function fillGroup(group) {
+  try {
+    const codes = group?.codes || [];
+    const primary = groupPrimaryEntry(group);
+    if (codes.length) await validate(primary, false);
+    await fillMetadata(primary);
+    for (const removed of group.removedCodes || []) {
+      await removeSelectedCode({...primary, ...removed});
+    }
+    if (!codes.length) {
+      await clearSelectedCodes();
+      showToast(`Cleared selected codes for case ${primary.case_id}.`);
+      return;
+    }
+    for (const code of codes) {
+      await selectCategory({...primary, ...code});
+    }
+    const fields = {keyword: document.getElementById("Keyword") || null, comments: document.getElementById("Comments") || null};
+    const keyword = codes.map(code => code.keyword).find(Boolean);
+    const comments = codes.map(code => code.comments).filter(Boolean).join("; ");
+    if (keyword && fields.keyword) setNativeValue(fields.keyword, keyword);
+    if (comments && fields.comments) setNativeValue(fields.comments, comments);
+    showToast(`Filled case ${primary.case_id}. Review before submitting.`);
+  } finally {
+    window.scrollTo({top: 0, behavior: "smooth"});
+  }
 }
 
 async function submitPage() {
@@ -681,23 +885,45 @@ async function submitPage() {
   await nextFrame();
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+async function handleMessage(message) {
+  if (message.action === "ping") {
+    return {ok: true, message: "Content script ready.", version: CONTENT_SCRIPT_VERSION};
+  }
+  if (message.action === "preview") {
+    await validate(message.entry, true);
+    return {ok: true, message: "Fields highlighted and options validated.", version: CONTENT_SCRIPT_VERSION};
+  }
+  if (message.action === "fill") {
+    await fill(message.entry);
+    return {ok: true, message: "Form filled.", version: CONTENT_SCRIPT_VERSION};
+  }
+  if (message.action === "fillGroup") {
+    await fillGroup(message.case || message.entry);
+    return {ok: true, message: "Form filled.", version: CONTENT_SCRIPT_VERSION};
+  }
+  if (message.action === "submitPage") {
+    await submitPage();
+    return {ok: true, message: "ACGME submit clicked.", version: CONTENT_SCRIPT_VERSION};
+  }
+  return {ok: false, error: "Unknown action", version: CONTENT_SCRIPT_VERSION};
+}
+
+if (window.__ACGME_IR_AUTOFILL__?.listener) {
+  chrome.runtime.onMessage.removeListener(window.__ACGME_IR_AUTOFILL__.listener);
+}
+
+const listener = (message, _sender, sendResponse) => {
   (async () => {
-    if (message.action === "ping") {
-      sendResponse({ok: true, message: "Content script ready."});
-    } else if (message.action === "preview") {
-      await validate(message.entry, true);
-      sendResponse({ok: true, message: "Fields highlighted and options validated."});
-    } else if (message.action === "fill") {
-      await fill(message.entry);
-      sendResponse({ok: true, message: "Form filled."});
-    } else if (message.action === "submitPage") {
-      await submitPage();
-      sendResponse({ok: true, message: "ACGME submit clicked."});
-    } else {
-      sendResponse({ok: false, error: "Unknown action"});
-    }
+    sendResponse(await handleMessage(message));
   })().catch(err => sendResponse({ok: false, error: err.message}));
   return true;
-});
+};
+
+window.__ACGME_IR_AUTOFILL__ = {
+  version: CONTENT_SCRIPT_VERSION,
+  listener,
+  handleMessage
+};
+
+chrome.runtime.onMessage.addListener(listener);
 })();

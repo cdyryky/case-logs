@@ -4,19 +4,32 @@ Local-first tooling to convert a Visage/mPower IR XLSX export into reviewed ACGM
 
 ## Quick Start
 
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
+Double-click `Start Case Logs.command` from Finder.
 
-python scripts/normalize_dropdowns.py
-python -m app.cli init-db
-python -m app.cli import-xlsx visage-data-export.xlsx
-streamlit run app/review_app.py
-uvicorn app.api:api --host 127.0.0.1 --port 8765
+Or run the same launcher from Terminal:
+
+```bash
+./scripts/start_local.sh
 ```
 
-Load `extension/` as an unpacked Chrome extension, log into ACGME normally, open Add Cases, then use the extension popup to preview, fill, and mark cases submitted.
+This creates `.venv` if needed, installs Python dependencies, initializes the local database, starts the FastAPI server at `http://127.0.0.1:8765`, and opens the Streamlit review UI at `http://127.0.0.1:8501`.
+
+Useful variants:
+
+```bash
+./scripts/start_local.sh api     # only the Chrome extension API
+./scripts/start_local.sh review  # only the Streamlit review UI
+```
+
+For first-time data prep, run:
+
+```bash
+. .venv/bin/activate
+python scripts/normalize_dropdowns.py
+python -m app.cli import-xlsx visage-data-export.xlsx
+```
+
+Load `extension/` as an unpacked Chrome extension, log into ACGME normally, open Add Cases, then use the extension popup to preview, fill, and mark cases submitted. Keep `./scripts/start_local.sh` running while using the extension.
 
 ## Data Safety
 

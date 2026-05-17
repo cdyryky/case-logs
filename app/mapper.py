@@ -8,6 +8,7 @@ from typing import Any
 
 from .config_io import load_dropdowns
 from .constants import CONFIG_DIR
+from .matching import MatchSuggestion, should_generate_from_suggestion, suggest_mappings
 from .utils import canonical_key, canonical_text, file_sha256
 
 
@@ -131,6 +132,60 @@ def validate_rules(rules: list[MappingRule], dropdowns: dict[str, Any] | None = 
         validate_dropdown(rule, config)
 
 
+def _build_generated_entry(
+    source: dict[str, Any],
+    target: MappingRule | MatchSuggestion,
+    mapping_rules_file_hash: str,
+    mapping_confidence: str,
+    review_reasons: list[str],
+    rule_id: str,
+    rule_version: str,
+    rule_name: str,
+) -> dict[str, Any]:
+    derived = source["derived"]
+    role_confidence = derived["role_confidence"]
+    review_status = "new_high_confidence" if mapping_confidence == "high" and role_confidence == "high" else "needs_review"
+    if review_reasons:
+        review_status = "needs_review"
+    component_label = target.component_label or "dominant_procedure"
+    dedupe_key = "|".join(
+        [
+            source["accession_number"],
+            derived["case_date"],
+            target.case_class,
+            target.area,
+            target.type,
+            target.acgme_description,
+            component_label,
+        ]
+    )
+    return {
+        "dedupe_key": dedupe_key,
+        "component_label": component_label,
+        "case_id": derived["case_id"],
+        "case_date": derived["case_date"],
+        "case_year": derived["case_year"],
+        "role": derived["role"],
+        "site": derived["site"],
+        "patient_type": derived["patient_type"],
+        "case_class": target.case_class,
+        "area": target.area,
+        "type": target.type,
+        "acgme_description": target.acgme_description,
+        "acgme_def_category": target.acgme_def_category,
+        "keyword": target.keyword,
+        "comments": "; ".join(review_reasons),
+        "mapping_rule_id": rule_id,
+        "mapping_rule_version": rule_version,
+        "mapping_rules_file_hash": mapping_rules_file_hash,
+        "mapping_rule_name": rule_name,
+        "mapping_confidence": mapping_confidence,
+        "role_confidence": role_confidence,
+        "compound_flag": 0,
+        "review_status": review_status,
+    }
+
+
 def map_source_case(
     source: dict[str, Any],
     rules: list[MappingRule],
@@ -156,52 +211,44 @@ def map_source_case(
         if rule.action != "generate":
             continue
 
-        derived = source["derived"]
         review_reasons = [r for r in [source.get("needs_review_reason"), rule.needs_review_reason] if r]
-        role_confidence = derived["role_confidence"]
-        mapping_confidence = rule.mapping_confidence
-        review_status = "new_high_confidence" if mapping_confidence == "high" and role_confidence == "high" else "needs_review"
-        if review_reasons:
-            review_status = "needs_review"
-        component_label = rule.component_label or "dominant_procedure"
-        dedupe_key = "|".join(
-            [
-                source["accession_number"],
-                derived["case_date"],
-                rule.case_class,
-                rule.area,
-                rule.type,
-                rule.acgme_description,
-                component_label,
-            ]
-        )
         generated.append(
-            {
-                "dedupe_key": dedupe_key,
-                "component_label": component_label,
-                "case_id": derived["case_id"],
-                "case_date": derived["case_date"],
-                "case_year": derived["case_year"],
-                "role": derived["role"],
-                "site": derived["site"],
-                "patient_type": derived["patient_type"],
-                "case_class": rule.case_class,
-                "area": rule.area,
-                "type": rule.type,
-                "acgme_description": rule.acgme_description,
-                "acgme_def_category": rule.acgme_def_category,
-                "keyword": rule.keyword,
-                "comments": "; ".join(review_reasons),
-                "mapping_rule_id": rule.rule_id,
-                "mapping_rule_version": rule.rule_version,
-                "mapping_rules_file_hash": mapping_rules_file_hash,
-                "mapping_rule_name": rule.rule_name,
-                "mapping_confidence": mapping_confidence,
-                "role_confidence": role_confidence,
-                "compound_flag": 0,
-                "review_status": review_status,
-            }
+            _build_generated_entry(
+                source,
+                rule,
+                mapping_rules_file_hash,
+                rule.mapping_confidence,
+                review_reasons,
+                rule.rule_id,
+                rule.rule_version,
+                rule.rule_name,
+            )
         )
+
+    suggestions = [] if generated or source_update["source_mapping_status"] in {"excluded", "flag_only"} else suggest_mappings(source, rules)
+    if suggestions:
+        source_update["mapping_suggestions"] = [suggestion.as_dict() for suggestion in suggestions]
+        top = suggestions[0]
+        if should_generate_from_suggestion(top):
+            generated.append(
+                _build_generated_entry(
+                    source,
+                    top,
+                    mapping_rules_file_hash,
+                    "medium",
+                    [
+                        reason
+                        for reason in [
+                            source.get("needs_review_reason"),
+                            f"Suggested by normalized matching: {top.reason}",
+                        ]
+                        if reason
+                    ],
+                    f"suggested:{top.rule_id}",
+                    "1",
+                    f"Suggested: {top.rule_name}",
+                )
+            )
 
     unique: dict[str, dict[str, Any]] = {}
     for entry in generated:

@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>ACGME IR Autofill</title>
     <style>
+      * { box-sizing: border-box; }
       body {
         width: 420px;
         margin: 0;
@@ -18,32 +19,54 @@
         font-weight: 700;
       }
       main { padding: 8px 10px; }
-      .entry {
+      main.start-only {
+        min-height: 120px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #start-view {
+        width: 100%;
+      }
+      #start-status {
+        margin-top: 6px;
+        min-height: 15px;
+        color: #49566b;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #gui-view[hidden],
+      #start-view[hidden] {
+        display: none;
+      }
+      .case-card {
         background: #ffffff;
         border: 1px solid #dce1ea;
         border-radius: 6px;
         padding: 7px 8px;
       }
-      .entry-main {
+      .case-main {
         display: flex;
         justify-content: space-between;
         gap: 8px;
-        font-weight: 700;
+        font-weight: 750;
       }
-      .entry-sub {
-        margin-top: 3px;
+      .case-sub,
+      .source-line {
+        margin-top: 4px;
+        color: #354154;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        color: #263349;
       }
-      .mini-grid {
+      .chips {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 4px;
-        margin-top: 5px;
+        margin-top: 6px;
       }
-      .mini {
+      .chip {
         background: #f2f5fa;
         border-radius: 4px;
         padding: 3px 5px;
@@ -51,101 +74,199 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .mini b {
+      .chip b {
         color: #667085;
         font-weight: 700;
         margin-right: 3px;
       }
-      .source-line {
-        margin-top: 5px;
-        color: #49566b;
+      .code-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-top: 6px;
+      }
+      .code-pill {
+        border: 1px solid #dce1ea;
+        border-radius: 5px;
+        padding: 4px 5px;
+        color: #263349;
+        background: #fbfcfe;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .entry-details {
-        display: none;
-        margin-top: 4px;
-        color: #566277;
-        white-space: pre-wrap;
-      }
-      .entry.expanded .entry-details { display: block; }
-      #details {
-        margin-top: 4px;
-        padding: 0;
-        border: 0;
-        background: transparent;
-        color: #155eef;
-        font-size: 11px;
-        font-weight: 700;
-      }
-      .buttons {
+      .actions {
         display: grid;
-        grid-template-columns: 38px 38px 1fr 1fr;
         gap: 5px;
         margin-top: 7px;
       }
+      .actions.start { grid-template-columns: 1fr; }
+      .actions.active { grid-template-columns: 1fr 1fr 1fr; }
       button {
         border: 1px solid #c5ccd8;
         background: #ffffff;
         color: #172033;
         border-radius: 5px;
-        padding: 5px 4px;
-        font-weight: 650;
+        padding: 6px 6px;
+        font-weight: 700;
         cursor: pointer;
         font-size: 11px;
         line-height: 1.1;
-        min-height: 28px;
-      }
-      button.transport {
-        font-size: 15px;
-        padding: 4px 0;
+        min-height: 30px;
       }
       button.primary {
         background: #155eef;
         border-color: #155eef;
         color: white;
       }
-      button.danger {
-        color: #9f1c1c;
+      button.danger { color: #9f1c1c; }
+      button.remove {
+        border-color: #f0b8b8;
+        background: #fff5f5;
+        color: #b42318;
+      }
+      button:disabled {
+        cursor: default;
+        opacity: .6;
       }
       #status {
         margin-top: 6px;
-        min-height: 14px;
+        min-height: 15px;
         color: #49566b;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .modal[hidden] { display: none; }
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        background: rgba(15, 23, 42, .24);
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        padding: 8px;
+      }
+      .editor {
+        width: 100%;
+        background: #ffffff;
+        border: 1px solid #c5ccd8;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .editor-head,
+      .editor-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 8px;
+        border-bottom: 1px solid #e5e9f0;
+      }
+      .editor-actions {
+        border-top: 1px solid #e5e9f0;
+        border-bottom: 0;
+      }
+      .editor-title { font-weight: 750; }
+      .editor-body {
+        padding: 7px 8px;
+        overflow: auto;
+      }
+      .editor-section + .editor-section { margin-top: 8px; }
+      .section-label {
+        font-size: 10px;
+        font-weight: 750;
+        color: #667085;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .check-row,
+      .result-row {
+        display: flex;
+        gap: 6px;
+        align-items: flex-start;
+        padding: 4px 0;
+        border-bottom: 1px solid #eef1f5;
+      }
+      .check-row span,
+      .result-row span {
+        min-width: 0;
+        flex: 1;
+      }
+      input[type="search"] {
+        width: 100%;
+        border: 1px solid #c5ccd8;
+        border-radius: 5px;
+        padding: 6px 7px;
+        font: inherit;
+      }
+      .tiny { min-height: 24px; padding: 4px 6px; }
     </style>
   </head>
   <body>
     <header>ACGME IR Autofill</header>
-    <main>
-      <div id="entry" class="entry">
-        <div class="entry-main">
-          <span id="entry-title">No case</span>
-          <span id="entry-date"></span>
+    <main id="popup-main" class="start-only">
+      <div id="start-view">
+        <div id="start-actions" class="actions start">
+          <button id="start-queue" class="primary" type="button">Start Queue</button>
         </div>
-        <div id="entry-sub" class="entry-sub">No case claimed.</div>
-        <div class="mini-grid">
-          <div class="mini"><b>Yr</b><span id="entry-year"></span></div>
-          <div class="mini"><b>Role</b><span id="entry-role"></span></div>
-          <div class="mini"><b>Pt</b><span id="entry-patient"></span></div>
-          <div class="mini"><b>Conf</b><span id="entry-confidence"></span></div>
+        <div id="start-status"></div>
+      </div>
+      <div id="gui-view" hidden>
+        <div id="case-card" class="case-card">
+          <div class="case-main">
+            <span id="case-title">Queue not started</span>
+            <span id="case-date"></span>
+          </div>
+          <div id="case-sub" class="case-sub">Open the ACGME Add Cases page, then start the queue.</div>
+          <div class="chips">
+            <div class="chip"><b>Yr</b><span id="case-year">-</span></div>
+            <div class="chip"><b>Role</b><span id="case-role">-</span></div>
+            <div class="chip"><b>Pt</b><span id="case-patient">-</span></div>
+            <div class="chip"><b>Codes</b><span id="case-code-count">0</span></div>
+          </div>
+          <div id="case-source" class="source-line"></div>
+          <div id="code-list" class="code-list"></div>
         </div>
-        <div id="entry-source" class="source-line"></div>
-        <div id="entry-details" class="entry-details"></div>
-        <button id="details" type="button">Details</button>
+        <div id="active-actions" class="actions active" hidden>
+          <button id="submit" class="primary" type="button">Submit</button>
+          <button id="edit" type="button">Edit</button>
+          <button id="skip" class="danger" type="button">Skip</button>
+        </div>
+        <div id="status"></div>
       </div>
-      <div class="buttons">
-        <button id="back" class="transport" title="Previous case" aria-label="Previous case">⏮</button>
-        <button id="claim" class="primary transport" title="Next case" aria-label="Next case">⏭</button>
-        <button id="fill">Fill</button>
-        <button id="submitted">Submit</button>
-      </div>
-      <div id="status"></div>
     </main>
+
+    <div id="edit-modal" class="modal" hidden>
+      <div class="editor">
+        <div class="editor-head">
+          <div class="editor-title">Edit Codes</div>
+          <button id="edit-close" class="tiny" type="button">Close</button>
+        </div>
+        <div class="editor-body">
+          <div class="editor-section">
+            <div class="section-label">Selected Guesses</div>
+            <div id="current-codes"></div>
+          </div>
+          <div class="editor-section">
+            <div class="section-label">Add From Full List</div>
+            <input id="code-search" type="search" placeholder="Search area, type, description">
+            <div id="search-results"></div>
+          </div>
+          <div class="editor-section">
+            <div class="section-label">Added</div>
+            <div id="added-codes"></div>
+          </div>
+        </div>
+        <div class="editor-actions">
+          <button id="edit-save" class="primary" type="button">Save & Apply</button>
+          <button id="edit-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -13,6 +13,13 @@ from app.export_payload import export_approved_json
 from app.importer import import_xlsx
 from app.learning import append_learned_rule, apply_mapping_to_matching_unsubmitted, learned_rule_count
 from app.models import connect, init_db, log_event, utc_now
+from app.review_queue import (
+    load_next_generated_group,
+    load_next_unmapped,
+    remap_unresolved_cases,
+    review_counts,
+    source_row_to_mapping_source,
+)
 from app.utils import case_year_from_date, canonical_key, format_acgme_date, patient_type
 
 
@@ -249,6 +256,88 @@ def learn_from_source_case(
     return learned["rule_id"], applied
 
 
+def default_values_for_source(source: sqlite3.Row) -> dict[str, object]:
+    mapping_source = source_row_to_mapping_source(source)
+    derived = mapping_source["derived"]
+    return {
+        "role": derived["role"],
+        "site": derived["site"],
+        "patient_type": derived["patient_type"],
+        "case_class": DEFAULT_CASE_CLASS,
+        "area": "",
+        "type": "",
+        "acgme_description": "",
+        "acgme_def_category": "",
+        "keyword": "",
+        "comments": source["needs_review_reason"] or "",
+        "component_label": canonical_key(source["procedure_text"]) or "dominant_procedure",
+    }
+
+
+def source_context(source: sqlite3.Row) -> None:
+    mapping_source = source_row_to_mapping_source(source)
+    derived = mapping_source["derived"]
+    st.subheader(f"{source['procedure_text'] or source['study_description'] or 'Unlabeled case'}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.caption("Date")
+    c1.write(format_acgme_date(source["study_date"]))
+    c2.caption("Accession")
+    c2.code(source["accession_number"])
+    c3.caption("Exam code")
+    c3.code(source["exam_code"] or "-")
+    c4.caption("Role")
+    c4.write(f"{derived['role']} ({derived['role_confidence']})")
+    st.caption(
+        f"Study: {source['study_description'] or '-'} | Attending: {source['attending_name'] or '-'}"
+    )
+    if source["needs_review_reason"]:
+        st.warning(source["needs_review_reason"])
+
+
+def mapping_form(
+    form_key: str,
+    defaults: dict[str, object],
+    submit_label: str,
+    allow_learning: bool = True,
+) -> tuple[bool, dict[str, object], bool, bool]:
+    with st.form(form_key):
+        role = st.selectbox("Role", ["Primary", "Secondary"], index=0 if defaults.get("role") == "Primary" else 1)
+        patient = st.selectbox(
+            "Patient Type",
+            ["Adult", "Pediatric"],
+            index=0 if defaults.get("patient_type") == "Adult" else 1,
+        )
+        site = st.text_input("Site", str(defaults.get("site") or DEFAULT_SITE))
+        areas = area_options()
+        default_area = str(defaults.get("area") or areas[0])
+        area = st.selectbox("Area", areas, index=index_or_zero(areas, default_area))
+        types = type_options_for_area(area)
+        default_type = str(defaults.get("type") or (types[0] if types else ""))
+        typ = st.selectbox("Type", types, index=index_or_zero(types, default_type))
+        acgme_description = st.text_input("ACGME Description", str(defaults.get("acgme_description") or ""))
+        acgme_def_category = st.text_input("Def Cat", str(defaults.get("acgme_def_category") or ""))
+        component = st.text_input("Component label", str(defaults.get("component_label") or "dominant_procedure"))
+        keyword = st.text_input("Keyword", str(defaults.get("keyword") or ""))
+        comments = st.text_area("Comments", str(defaults.get("comments") or ""))
+        learn = st.checkbox("Learn for future imports", value=allow_learning, disabled=not allow_learning)
+        apply_now = st.checkbox("Apply to matching unsubmitted entries now", value=allow_learning, disabled=not allow_learning)
+        submitted = st.form_submit_button(submit_label, type="primary")
+    values = {
+        "role": role,
+        "site": site,
+        "patient_type": patient,
+        "case_class": DEFAULT_CASE_CLASS,
+        "area": area,
+        "type": typ,
+        "acgme_description": acgme_description,
+        "acgme_def_category": acgme_def_category,
+        "component_label": component,
+        "keyword": keyword,
+        "comments": comments,
+    }
+    return submitted, values, learn, apply_now
+
+
 def mark_before_date(conn: sqlite3.Connection, cutoff: str, mode: str) -> int:
     cutoff_parts = [int(part) for part in cutoff.split("-")]
     cutoff_key = tuple(cutoff_parts)
@@ -318,11 +407,166 @@ with st.sidebar:
         out = export_approved_json(conn)
         st.success(f"Wrote {out}")
 
-tab_entries, tab_unmapped, tab_imports = st.tabs(["Generated entries", "Unmapped", "Imports"])
+    st.header("Remap")
+    if st.button("Remap unresolved cases"):
+        with st.spinner("Applying improved matching to unresolved cases..."):
+            summary = remap_unresolved_cases(conn)
+        st.success(
+            "Checked {checked}; generated {generated_entries} entries across {generated_cases} cases; "
+            "{suggested_only} have suggestions only.".format(**summary)
+        )
+        st.rerun()
 
-with tab_entries:
+tab_review, tab_diagnostics, tab_imports = st.tabs(["Review Queue", "Diagnostics", "Imports"])
+
+with tab_review:
+    counts = review_counts(conn)
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Batch approvable", counts["batch_approvable"])
+    m2.metric("Needs review", counts["needs_review"])
+    m3.metric("Unmapped suggestions", counts["unmapped_with_suggestions"])
+    m4.metric("Unmapped no suggestion", counts["unmapped_without_suggestions"])
+    m5.metric("Upload failures", counts["upload_failures"])
+
+    qc1, qc2 = st.columns([2, 1])
+    with qc1:
+        queue = st.radio(
+            "Queue",
+            ["Needs review", "Unmapped with suggestions", "Unmapped without suggestions", "Upload failures"],
+            horizontal=True,
+        )
+    with qc2:
+        if st.button("Approve all safe high-confidence", disabled=counts["batch_approvable"] == 0):
+            ids = pd.read_sql_query(
+                """
+                SELECT id FROM generated_entries
+                WHERE review_status = 'new_high_confidence'
+                  AND mapping_confidence = 'high'
+                  AND role_confidence = 'high'
+                  AND compound_flag = 0
+                  AND upload_status IN ('not_uploaded', 'reset')
+                """,
+                conn,
+            )["id"].astype(int).tolist()
+            update_review_status(conn, ids, "approved")
+            st.success(f"Approved {len(ids)} entries.")
+            st.rerun()
+
+    if queue == "Needs review":
+        source, entries = load_next_generated_group(conn)
+        if not source:
+            st.info("No generated entries need review.")
+        else:
+            source_context(source)
+            rows = [
+                {
+                    "id": row["id"],
+                    "role": row["role"],
+                    "area": row["area"],
+                    "type": row["type"],
+                    "description": row["acgme_description"],
+                    "def_cat": row["acgme_def_category"],
+                    "confidence": row["mapping_confidence"],
+                    "reason": row["comments"] or row["mapping_rule_name"],
+                }
+                for row in entries
+            ]
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+            ids = [int(row["id"]) for row in entries]
+            a1, a2 = st.columns(2)
+            with a1:
+                if st.button("Approve", type="primary"):
+                    update_review_status(conn, ids, "approved")
+                    st.rerun()
+            with a2:
+                if st.button("Skip"):
+                    update_review_status(conn, ids, "skipped")
+                    st.rerun()
+
+            with st.expander("Edit"):
+                labels = [f"{row['id']}: {row['area']} / {row['type']}" for row in entries]
+                selected_label = st.selectbox("Entry", labels)
+                selected_id = int(selected_label.split(":", 1)[0])
+                selected = next(row for row in entries if int(row["id"]) == selected_id)
+                defaults = dict(selected)
+                submitted, values, learn, apply_now = mapping_form("review_edit_form", defaults, "Save")
+                if submitted:
+                    save_entry_edit(conn, selected_id, values)
+                    message = "Entry saved."
+                    if learn:
+                        rule_id, applied = learn_from_generated_entry(conn, selected_id, values, apply_now)
+                        message += f" Learned `{rule_id}`; applied to {applied} matching entries."
+                    st.success(message)
+                    st.rerun()
+
+    elif queue in {"Unmapped with suggestions", "Unmapped without suggestions"}:
+        source, suggestions = load_next_unmapped(conn, require_suggestion=queue == "Unmapped with suggestions")
+        if not source:
+            st.info("No source cases in this queue.")
+        else:
+            source_context(source)
+            defaults = default_values_for_source(source)
+            if suggestions:
+                st.caption("Suggested ACGME targets")
+                suggestion_labels = [
+                    f"{idx + 1}. {item['area']} / {item['type']} ({item['confidence']}, {item['score']:.3f})"
+                    for idx, item in enumerate(suggestions)
+                ]
+                selected_suggestion = st.radio("Suggestion", suggestion_labels, label_visibility="collapsed")
+                suggestion = suggestions[suggestion_labels.index(selected_suggestion)]
+                defaults.update(
+                    {
+                        "area": suggestion["area"],
+                        "type": suggestion["type"],
+                        "acgme_description": suggestion["acgme_description"],
+                        "acgme_def_category": suggestion["acgme_def_category"],
+                        "keyword": suggestion["keyword"],
+                        "component_label": suggestion["component_label"],
+                        "comments": suggestion["reason"],
+                    }
+                )
+                if st.button("Use suggestion", type="primary"):
+                    entry_id = create_manual_entry(conn, int(source["id"]), defaults)
+                    rule_id, applied = learn_from_source_case(conn, int(source["id"]), defaults, True)
+                    st.success(f"Created entry {entry_id}. Learned `{rule_id}`; applied to {applied} matching entries.")
+                    st.rerun()
+
+            with st.expander("Edit"):
+                submitted, values, learn, apply_now = mapping_form("unmapped_edit_form", defaults, "Create entry")
+                if submitted:
+                    entry_id = create_manual_entry(conn, int(source["id"]), values)
+                    message = f"Created entry {entry_id}."
+                    if learn:
+                        rule_id, applied = learn_from_source_case(conn, int(source["id"]), values, apply_now)
+                        message += f" Learned `{rule_id}`; applied to {applied} matching entries."
+                    st.success(message)
+                    st.rerun()
+            if st.button("Skip"):
+                conn.execute(
+                    "UPDATE source_cases SET source_mapping_status = 'excluded', needs_review_reason = COALESCE(needs_review_reason, 'Skipped in review') WHERE id = ?",
+                    (source["id"],),
+                )
+                conn.commit()
+                st.rerun()
+
+    else:
+        failures = load_entries(conn, "Upload failures")
+        st.dataframe(failures, width="stretch", hide_index=True)
+        selected_raw = st.text_input("Failed entry IDs, comma-separated")
+        selected_ids = [int(x.strip()) for x in selected_raw.split(",") if x.strip().isdigit()]
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Reset selected", disabled=not selected_ids):
+                reset_upload(conn, selected_ids)
+                st.rerun()
+        with c2:
+            if st.button("Mark selected submitted", disabled=not selected_ids):
+                mark_upload_submitted(conn, selected_ids)
+                st.rerun()
+
+with tab_diagnostics:
     filter_name = st.selectbox(
-        "Filter",
+        "Generated entries",
         [
             "New / needs review",
             "Batch approvable",
@@ -333,141 +577,11 @@ with tab_entries:
         ],
     )
     df = load_entries(conn, filter_name)
-    st.caption(f"{len(df)} entries")
+    st.caption(f"{len(df)} generated entries")
     st.dataframe(df, width="stretch", hide_index=True)
-    selected_raw = st.text_input("Entry IDs for action, comma-separated")
-    selected_ids = [int(x.strip()) for x in selected_raw.split(",") if x.strip().isdigit()]
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        if st.button("Batch approve visible high-confidence"):
-            visible = df[
-                (df["mapping_confidence"] == "high")
-                & (df["role_confidence"] == "high")
-                & (df["compound_flag"] == 0)
-            ]["id"].astype(int).tolist()
-            update_review_status(conn, visible, "approved")
-            st.success(f"Approved {len(visible)} entries.")
-            st.rerun()
-    with c2:
-        if st.button("Approve selected", disabled=not selected_ids):
-            update_review_status(conn, selected_ids, "approved")
-            st.rerun()
-    with c3:
-        if st.button("Skip selected permanently", disabled=not selected_ids):
-            update_review_status(conn, selected_ids, "skipped")
-            st.rerun()
-    with c4:
-        if st.button("Reset upload selected", disabled=not selected_ids):
-            reset_upload(conn, selected_ids)
-            st.rerun()
-    with c5:
-        if st.button("Mark selected submitted", disabled=not selected_ids):
-            mark_upload_submitted(conn, selected_ids)
-            st.rerun()
-
-    with st.expander("Edit one generated entry"):
-        edit_id = st.number_input("Entry ID", min_value=0, step=1, key="edit_id")
-        if edit_id:
-            row = conn.execute("SELECT * FROM generated_entries WHERE id = ?", (int(edit_id),)).fetchone()
-            if row:
-                with st.form("edit_entry_form"):
-                    role = st.selectbox("Role", ["Primary", "Secondary"], index=0 if row["role"] == "Primary" else 1)
-                    site = st.text_input("Site", row["site"])
-                    patient = st.selectbox("Patient Type", ["Adult", "Pediatric"], index=0 if row["patient_type"] == "Adult" else 1)
-                    case_class = DEFAULT_CASE_CLASS
-                    areas = area_options()
-                    area = st.selectbox("Area", areas, index=index_or_zero(areas, row["area"]))
-                    types = type_options_for_area(area)
-                    typ = st.selectbox("Type", types, index=index_or_zero(types, row["type"]))
-                    acgme_description = st.text_input("ACGME Description", row["acgme_description"] or "")
-                    acgme_def_category = st.text_input("Def Cat", row["acgme_def_category"] or "")
-                    component = st.text_input("Component label", row["component_label"])
-                    keyword = st.text_input("Keyword", row["keyword"] or "")
-                    comments = st.text_area("Comments", row["comments"] or "")
-                    learn = st.checkbox("Learn this mapping correction for future imports", value=True)
-                    apply_now = st.checkbox("Apply learned mapping to matching unsubmitted entries now", value=True)
-                    if st.form_submit_button("Save as edited"):
-                        values = {
-                            "role": role,
-                            "site": site,
-                            "patient_type": patient,
-                            "case_class": case_class,
-                            "area": area,
-                            "type": typ,
-                            "acgme_description": acgme_description,
-                            "acgme_def_category": acgme_def_category,
-                            "component_label": component,
-                            "keyword": keyword,
-                            "comments": comments,
-                        }
-                        save_entry_edit(
-                            conn,
-                            int(edit_id),
-                            values,
-                        )
-                        message = "Entry saved as edited."
-                        if learn:
-                            rule_id, applied = learn_from_generated_entry(conn, int(edit_id), values, apply_now)
-                            message += f" Learned `{rule_id}`; applied to {applied} matching unsubmitted entries."
-                        st.success(message)
-                        st.rerun()
-
-with tab_unmapped:
     unmapped = load_unmapped(conn)
-    st.caption("Unmapped and flag-only source cases do not create exportable ACGME entries.")
+    st.caption("Unmapped and flag-only source cases")
     st.dataframe(unmapped, width="stretch", hide_index=True)
-    with st.expander("Create manual entry from source case"):
-        source_id = st.number_input("Source case ID", min_value=0, step=1, key="manual_source_id")
-        if source_id:
-            source = conn.execute("SELECT * FROM source_cases WHERE id = ?", (int(source_id),)).fetchone()
-            if source:
-                default_patient = patient_type(source["study_date"], source["patient_birth_date"])
-                with st.form("manual_entry_form"):
-                    st.write(f"Accession `{source['accession_number']}` | {source['procedure_text']}")
-                    role = st.selectbox("Role", ["Primary", "Secondary"])
-                    site = st.text_input("Site", DEFAULT_SITE)
-                    patient = st.selectbox(
-                        "Patient Type",
-                        ["Adult", "Pediatric"],
-                        index=0 if default_patient == "Adult" else 1,
-                    )
-                    case_class = DEFAULT_CASE_CLASS
-                    areas = area_options()
-                    area = st.selectbox("Area", areas)
-                    types = type_options_for_area(area)
-                    typ = st.selectbox("Type", types)
-                    acgme_description = st.text_input("ACGME Description")
-                    acgme_def_category = st.text_input("Def Cat")
-                    component = st.text_input("Component label", canonical_key(source["procedure_text"]) or "manual")
-                    keyword = st.text_input("Keyword")
-                    comments = st.text_area("Comments", source["needs_review_reason"] or "")
-                    learn = st.checkbox("Learn this manual mapping for future imports", value=True)
-                    apply_now = st.checkbox("Apply learned mapping to matching unsubmitted entries now", value=True)
-                    if st.form_submit_button("Create edited entry"):
-                        values = {
-                            "role": role,
-                            "site": site,
-                            "patient_type": patient,
-                            "case_class": case_class,
-                            "area": area,
-                            "type": typ,
-                            "acgme_description": acgme_description,
-                            "acgme_def_category": acgme_def_category,
-                            "component_label": component,
-                            "keyword": keyword,
-                            "comments": comments,
-                        }
-                        entry_id = create_manual_entry(
-                            conn,
-                            int(source_id),
-                            values,
-                        )
-                        message = f"Created entry {entry_id}."
-                        if learn:
-                            rule_id, applied = learn_from_source_case(conn, int(source_id), values, apply_now)
-                            message += f" Learned `{rule_id}`; applied to {applied} matching unsubmitted entries."
-                        st.success(message)
-                        st.rerun()
 
 with tab_imports:
     imports = pd.read_sql_query("SELECT * FROM imports ORDER BY imported_at DESC", conn)

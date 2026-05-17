@@ -8,7 +8,17 @@ from pydantic import BaseModel
 
 from .constants import DEFAULT_DB_PATH
 from .models import connect, init_db
-from .upload_queue import back, claim_next, get_current, update_upload_status
+from .upload_queue import (
+    back,
+    claim_next,
+    claim_next_group,
+    get_current,
+    get_current_group,
+    save_group_edit,
+    search_acgme_options,
+    update_group_upload_status,
+    update_upload_status,
+)
 
 api = FastAPI(title="ACGME IR Case Log Local API")
 api.add_middleware(
@@ -21,6 +31,10 @@ api.add_middleware(
 
 class FailurePayload(BaseModel):
     failure_reason: str | None = None
+
+
+class GroupEditPayload(BaseModel):
+    codes: list[dict[str, Any]]
 
 
 def _with_db(fn):
@@ -49,6 +63,85 @@ def api_claim_next() -> dict[str, Any]:
 def api_current() -> dict[str, Any]:
     item = _with_db(get_current)
     return {"entry": item}
+
+
+@api.post("/queue/group/claim_next")
+def api_claim_next_group() -> dict[str, Any]:
+    item = _with_db(claim_next_group)
+    return {"case": item}
+
+
+@api.get("/queue/group/current")
+def api_current_group() -> dict[str, Any]:
+    item = _with_db(get_current_group)
+    return {"case": item}
+
+
+@api.post("/queue/group/{source_case_id}/autofilled")
+def api_group_autofilled(source_case_id: int) -> dict[str, Any]:
+    try:
+        return {
+            "case": _with_db(
+                lambda conn: update_group_upload_status(conn, source_case_id, "autofilled", "autofilled")
+            )
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api.post("/queue/group/{source_case_id}/submitted")
+def api_group_submitted(source_case_id: int) -> dict[str, Any]:
+    try:
+        return {
+            "case": _with_db(
+                lambda conn: update_group_upload_status(conn, source_case_id, "submitted", "submitted")
+            )
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api.post("/queue/group/{source_case_id}/skip_upload")
+def api_group_skip_upload(source_case_id: int) -> dict[str, Any]:
+    try:
+        return {
+            "case": _with_db(
+                lambda conn: update_group_upload_status(
+                    conn, source_case_id, "skipped_upload_session", "skip_upload"
+                )
+            )
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api.post("/queue/group/{source_case_id}/failed")
+def api_group_failed(source_case_id: int, payload: FailurePayload) -> dict[str, Any]:
+    try:
+        return {
+            "case": _with_db(
+                lambda conn: update_group_upload_status(
+                    conn, source_case_id, "failed", "failed", payload.failure_reason
+                )
+            )
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api.post("/queue/group/{source_case_id}/edit")
+def api_group_edit(source_case_id: int, payload: GroupEditPayload) -> dict[str, Any]:
+    try:
+        return {"case": _with_db(lambda conn: save_group_edit(conn, source_case_id, payload.codes))}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@api.get("/acgme/options")
+def api_acgme_options(q: str = "", limit: int = 80) -> dict[str, Any]:
+    return {"options": search_acgme_options(q, max(1, min(limit, 200)))}
 
 
 @api.post("/entries/{entry_id}/autofilled")
