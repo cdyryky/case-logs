@@ -60,9 +60,25 @@ SECTION_STOP_RE = re.compile(
     r"Pre-procedure|Post-procedure diagnosis|Preoperative diagnosis|PREOPERATIVE DIAGNOSIS|"
     r"POST-OPERATIVE DIAGNOSIS|Indication|Additional clinical history|TECHNIQUE|FINDINGS|"
     r"COMPLICATIONS|CLINICAL HISTORY|SEDATION|ANESTHESIA|ACCESS/CLOSURE|Radiation Dose|Contrast|"
+    r"Preliminary Report|Preliminary Report Electronically Signed By|Final Report Electronically Signed By|"
+    r"Attending note|ATTENDING PRESENCE|I have personally reviewed|Signer Name|Final Report|"
     r"[A-Z0-9 /()\-]+ PROCEDURE SUMMARY"
     r")\s*:?\s*$",
     re.I | re.M,
+)
+
+REPORT_FOOTER_RE = re.compile(
+    r"^\s*(?:"
+    r"Preliminary Report(?:\s+-\s+subject to revision until finalized)?|"
+    r"Preliminary Report Electronically Signed By|"
+    r"Final Report Electronically Signed By|"
+    r"Attending note|"
+    r"ATTENDING PRESENCE|"
+    r"I have personally reviewed|"
+    r"Signer Name|"
+    r"Final Report"
+    r")\b",
+    re.I,
 )
 
 PERSONNEL_END_RE = re.compile(
@@ -121,6 +137,10 @@ def _clean_line(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _is_report_footer_line(value: str) -> bool:
+    return bool(REPORT_FOOTER_RE.match(value.strip()))
+
+
 def _strip_bullet(value: str) -> str:
     return _clean_line(re.sub(r"^\s*(?:[-*]|\d+[\.)])\s*", "", value))
 
@@ -151,16 +171,19 @@ def _section_after_heading(text: str, heading: str) -> str:
     stop = SECTION_STOP_RE.search(text, start)
     body = text[start : stop.start() if stop else len(text)]
     lines = [first] if first else []
-    lines.extend(_nonblank_lines(body))
+    for line in _nonblank_lines(body):
+        if _is_report_footer_line(line):
+            break
+        lines.append(line)
     return "\n".join(line for line in lines if line)
 
 
 def _extract_impression(text: str) -> str:
-    return _section_after_heading(text, "IMPRESSION")
+    return _section_after_heading(text, "IMPRESSION") or _section_after_heading(text, "FINDINGS/IMPRESSION")
 
 
 def _extract_fallback_findings(text: str) -> str:
-    for heading in ("FINDINGS/IMPRESSION", "FINDINGS", "PROCEDURE COMMENTS AND FINDINGS"):
+    for heading in ("FINDINGS", "PROCEDURE COMMENTS AND FINDINGS"):
         value = _section_after_heading(text, heading)
         if value:
             return value
@@ -210,7 +233,7 @@ def _extract_procedure_title(text: str) -> tuple[str, list[str], str]:
 
 def _extract_procedure_summaries(text: str) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
-    pattern = re.compile(r"^\s*(.*PROCEDURE SUMMARY)\s*:\s*$", re.I | re.M)
+    pattern = re.compile(r"^\s*(.*PROCEDURE SUMMARY)\s*:?\s*$", re.I | re.M)
     matches = list(pattern.finditer(text))
     for index, match in enumerate(matches):
         start = match.end()
@@ -399,7 +422,13 @@ def parse_mpower_report(report_text: str | None, aliases: list[str] | None = Non
     for summary in summaries:
         candidate_phrases.extend(summary["bullets"])
         candidate_phrases.extend(summary["additional_procedures"])
-    unique_candidates = list(dict.fromkeys(_strip_bullet(v) for v in candidate_phrases if _strip_bullet(v)))
+    unique_candidates = list(
+        dict.fromkeys(
+            stripped
+            for value in candidate_phrases
+            if (stripped := _strip_bullet(value)) and not _is_report_footer_line(stripped)
+        )
+    )
 
     warnings: list[str] = []
     if not impression:

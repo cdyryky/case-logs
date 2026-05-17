@@ -8,13 +8,22 @@ import unittest
 from pathlib import Path
 from datetime import datetime
 
+from app.candidates import (
+    add_manual_candidate,
+    approve_candidate_review,
+    build_match_candidates,
+    load_acgme_targets,
+    load_candidates,
+    search_acgme_targets,
+    store_match_candidates,
+)
 from app.learning import append_learned_rule
 from app.importer import import_mpower_csv, insert_generated_entries, insert_source_case
 from app.matching import match_tokens
 from app.mapper import load_mapping_rules, map_source_case
 from app.models import init_db
 from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row, transform_source_row
-from app.review_queue import remap_unresolved_cases
+from app.review_queue import load_next_candidate_group, remap_unresolved_cases
 from app.upload_queue import (
     claim_next,
     claim_next_group,
@@ -145,6 +154,83 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(role["role"], "Secondary")
         self.assertEqual(role["role_confidence"], "high")
 
+    def test_mpower_report_parser_excludes_signature_footer_from_impression(self) -> None:
+        report = (
+            "US GUIDED SUPERFICIAL BIOPSY/ASPIRATIONS\n"
+            "EXAM DATE: 2/6/2024 9:49 AM\n\n"
+            "PROCEDURE PERSONNEL:\n"
+            "Attending: Example Attending\n"
+            "Other: Cody Key\n\n"
+            "IMPRESSION:\n"
+            "1. Successful ultrasound-guided abdominal fat pad core needle biopsy.\n\n"
+            "Preliminary Report - subject to revision until finalized: Cody Key, MD on 2/6/2024 10:21 AM\n"
+            "Attending note: I was physically present for the key portion(s) of the procedure and immediately available for the entire procedure.\n"
+            "I have personally reviewed the images of this study and agree with the above report.\n"
+            "Final Report Electronically Signed By: Example Attending on 2/6/2024 11:08 AM\n"
+        )
+        parsed = parse_mpower_report(report, ["Cody Key"])
+        self.assertEqual(
+            parsed["impression"],
+            "1. Successful ultrasound-guided abdominal fat pad core needle biopsy.",
+        )
+        self.assertIn(
+            "Successful ultrasound-guided abdominal fat pad core needle biopsy.",
+            parsed["candidate_procedure_phrases"],
+        )
+        self.assertFalse(
+            any("Preliminary Report" in phrase or "Final Report" in phrase for phrase in parsed["candidate_procedure_phrases"])
+        )
+
+    def test_mpower_report_parser_uses_findings_impression_as_impression(self) -> None:
+        report = (
+            "ULTRASOUND-GUIDED PARACENTESIS\n"
+            "EXAM DATE: 2/6/2024 11:48 AM\n\n"
+            "PROCEDURE PERSONNEL:\n"
+            "Attending: Example Attending\n"
+            "Other: Cody Key\n\n"
+            "FINDINGS/IMPRESSION:\n"
+            "1. Successful ultrasound-guided diagnostic paracentesis with removal of 0.1L of serous fluid.\n\n"
+            "Preliminary Report - subject to revision until finalized: Cody Key, MD on 2/6/2024 1:46 PM\n"
+        )
+        parsed = parse_mpower_report(report, ["Cody Key"])
+        self.assertEqual(
+            parsed["impression"],
+            "1. Successful ultrasound-guided diagnostic paracentesis with removal of 0.1L of serous fluid.",
+        )
+        self.assertEqual(parsed["fallback_findings"], "")
+        self.assertNotIn("missing_impression", parsed["parse_warnings"])
+        self.assertIn(
+            "Successful ultrasound-guided diagnostic paracentesis with removal of 0.1L of serous fluid.",
+            parsed["candidate_procedure_phrases"],
+        )
+
+    def test_mpower_report_parser_handles_colonless_procedure_summary(self) -> None:
+        report = (
+            "PROCEDURE: Genitourinary catheter exchange\n\n"
+            "Procedural Personnel\n"
+            "Attending physician(s): Example Attending, MD\n"
+            "Resident physician(s): Cody Key, MD\n\n"
+            "IMPRESSION:\n"
+            "1. Serial UPJ ureteroplasty.\n"
+            "2. Transplant nephroureteral stent exchange/upsize.\n\n"
+            "Plan:\n"
+            "Tube(s) capped. Return in 2 weeks.\n\n"
+            "PROCEDURE SUMMARY\n"
+            "- Target organ: Transplant kidney\n"
+            "- Antegrade nephrostogram(s) via the existing access\n"
+            "- Nephroureteral tube exchange\n"
+            "- Additional procedure(s): None\n\n"
+            "PROCEDURE DETAILS:\n"
+            "Details omitted.\n"
+        )
+        parsed = parse_mpower_report(report, ["Cody Key"])
+        self.assertEqual(len(parsed["procedure_summary_sections"]), 1)
+        bullets = parsed["procedure_summary_sections"][0]["bullets"]
+        self.assertIn("Target organ: Transplant kidney", bullets)
+        self.assertIn("Nephroureteral tube exchange", bullets)
+        self.assertEqual(parsed["procedure_summary_sections"][0]["additional_procedures"], [])
+        self.assertNotIn("missing_procedure_summary", parsed["parse_warnings"])
+
     def test_mpower_role_ignores_other_outside_personnel_section(self) -> None:
         report = (
             "PROCEDURE: Drainage catheter check\n\n"
@@ -173,6 +259,283 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(role["role_parse_source"], "non_resident_personnel_line")
         self.assertEqual(role["role_confidence"], "low")
         self.assertTrue(role["resident_found_in_report"])
+
+    def test_acgme_target_loader_uses_confirmed_csv(self) -> None:
+        targets = load_acgme_targets()
+        self.assertEqual(len(targets), 365)
+        self.assertEqual(len({target.acgme_code for target in targets}), 365)
+        by_description = {target.acgme_description: target for target in targets}
+        retrieval = by_description["IVC filter retrieval"]
+        self.assertEqual(retrieval.acgme_code, "31742")
+        self.assertEqual(retrieval.area, "Venous Interventions")
+        self.assertEqual(retrieval.type, "Venous foreign body retrieval")
+        self.assertEqual(retrieval.acgme_def_category, "Venous Intervention")
+        placement = by_description["IVC filter placement"]
+        self.assertEqual(placement.acgme_code, "31740")
+        nephroureteral = by_description["Nephroureteral stent change"]
+        self.assertEqual(nephroureteral.acgme_code, "31852")
+        self.assertEqual(nephroureteral.area, "GU Intervention")
+        self.assertEqual(nephroureteral.type, "GU tube/stent exchange")
+        self.assertEqual(nephroureteral.acgme_def_category, "Catheter exchange")
+        stricture = by_description["GU stricture dilation"]
+        self.assertEqual(stricture.acgme_code, "31840")
+
+    def test_candidate_generation_uses_parsed_multi_procedure_evidence(self) -> None:
+        raw = {
+            "Accession Number": "202507270453",
+            "Modality": "IR",
+            "Exam Code": "IRIVCFIL",
+            "Exam Description": "IR IVC FILTER PLACEMENT",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURES:\n"
+                "1. Inferior vena cava (IVC) filter insertion\n"
+                "2. Renal transarterial embolization\n\n"
+                "Procedural Personnel\n"
+                "Attending physician(s): Example Attending, MD\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "1. Insertion of inferior vena cava filter.\n"
+                "2. Right renal angiography with embolization.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2025-07-27 15:53:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        candidates = build_match_candidates(source)
+        labels = {(candidate["area"], candidate["type"]) for candidate in candidates}
+        self.assertIn(("Venous Interventions", "IVC filter placement"), labels)
+        self.assertIn(("Arterial Interventions", "Arterial embolization"), labels)
+        self.assertTrue(
+            any(
+                candidate["type"] == "IVC filter placement"
+                and candidate["confidence"] in {"high", "medium"}
+                and candidate["default_checked"] == 1
+                for candidate in candidates
+            )
+        )
+
+    def test_candidate_generation_selects_specific_gu_events_without_generic_overmatch(self) -> None:
+        raw = {
+            "Accession Number": "202605130816",
+            "Modality": "IR",
+            "Exam Code": "IRTUBECHGL",
+            "Exam Description": "IR NEPHROSTOMY TUBE / STENT CHECK/CHANGE",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Genitourinary catheter exchange\n\n"
+                "Procedural Personnel\n"
+                "Attending physician(s): Example Attending, MD\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "1. Serial UPJ ureteroplasty.\n"
+                "2. Transplant nephroureteral stent exchange/upsize.\n\n"
+                "Plan:\n"
+                "Tube(s) capped. Return in 2 weeks.\n\n"
+                "PROCEDURE SUMMARY\n"
+                "- Target organ: Transplant kidney\n"
+                "- Antegrade nephrostogram(s) via the existing access\n"
+                "- Nephroureteral tube exchange\n"
+                "- Additional procedure(s): None\n\n"
+                "PROCEDURE DETAILS:\n"
+                "Details omitted.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-13 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        candidates = build_match_candidates(source)
+        checked = [
+            candidate
+            for candidate in candidates
+            if candidate["default_checked"] == 1
+        ]
+        checked_labels = {
+            (
+                candidate["acgme_code"],
+                candidate["area"],
+                candidate["type"],
+                candidate["acgme_description"],
+                candidate["acgme_def_category"],
+            )
+            for candidate in checked
+        }
+        self.assertIn(
+            (
+                "31852",
+                "GU Intervention",
+                "GU tube/stent exchange",
+                "Nephroureteral stent change",
+                "Catheter exchange",
+            ),
+            checked_labels,
+        )
+        self.assertIn(("31840", "GU Intervention", "GU stricture dilation", "GU stricture dilation", "GU Intervention"), checked_labels)
+        self.assertNotIn(("", "GU Intervention", "GU tube/stent exchange", "", ""), checked_labels)
+        selected_types = {(candidate["area"], candidate["type"]) for candidate in checked}
+        self.assertNotIn(("Drainage Procedures", "Drainage tube exchange"), selected_types)
+        self.assertNotIn(("Venous Interventions", "Venous thrombolysis catheter change"), selected_types)
+        self.assertNotIn(("Arterial Interventions", "Thrombolysis catheter change arterial"), selected_types)
+        self.assertNotIn(("Biliary Interventions", "Biliary tube maintenance"), selected_types)
+
+    def test_acgme_search_adds_checked_manual_candidate(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        raw = {
+            "Accession Number": "202601020001",
+            "Modality": "IR",
+            "Exam Code": "IRUNKNOWN",
+            "Exam Description": "IR UNKNOWN",
+            "CPT Code": "",
+            "Report Text": "PROCEDURE: Unknown procedure\n\nResident physician(s): Cody Key, MD",
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-02 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        source = transform_mpower_row(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
+        results = search_acgme_targets("paracentesis")
+        self.assertTrue(results)
+        candidate_id = add_manual_candidate(conn, source_id, results[0])
+        row = conn.execute("SELECT * FROM source_match_candidates WHERE id = ?", (candidate_id,)).fetchone()
+        self.assertEqual(row["source_kind"], "manual_search")
+        self.assertEqual(row["default_checked"], 1)
+        self.assertEqual(row["confidence"], "manual")
+
+    def test_acgme_search_finds_description_and_def_category_targets(self) -> None:
+        filter_results = search_acgme_targets("filter")
+        filter_codes = {row["acgme_code"] for row in filter_results}
+        self.assertTrue({"31740", "31742"} <= filter_codes)
+        self.assertTrue(any(row["label"].startswith("31742 / IVC filter retrieval") for row in filter_results))
+        nephroureteral = search_acgme_targets("nephroureteral stent change")
+        self.assertTrue(
+            any(
+                row["acgme_code"] == "31852"
+                and row["area"] == "GU Intervention"
+                and row["type"] == "GU tube/stent exchange"
+                and row["acgme_description"] == "Nephroureteral stent change"
+                and row["acgme_def_category"] == "Catheter exchange"
+                for row in nephroureteral
+            )
+        )
+        catheter_exchange = search_acgme_targets("catheter exchange")
+        self.assertTrue(any(row["acgme_def_category"] == "Catheter exchange" for row in catheter_exchange))
+        stricture = search_acgme_targets("GU stricture dilation")
+        self.assertTrue(any(row["acgme_code"] == "31840" and row["area"] == "GU Intervention" and row["type"] == "GU stricture dilation" for row in stricture))
+
+    def test_candidate_generation_selects_ivc_filter_retrieval_code(self) -> None:
+        raw = {
+            "Accession Number": "202605130877",
+            "Modality": "IR",
+            "Exam Code": "IRIVCFILRM",
+            "Exam Description": "IR IVC FILTER REMOVAL",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Inferior vena cava (IVC) filter retrieval\n\n"
+                "Procedural Personnel\n"
+                "Attending physician(s): Example Attending, MD\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "1. Successful IVC filter retrieval.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-13 12:50:57-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        candidates = build_match_candidates(source)
+        checked = [candidate for candidate in candidates if candidate["default_checked"] == 1]
+        self.assertTrue(
+            any(
+                candidate["acgme_code"] == "31742"
+                and candidate["acgme_description"] == "IVC filter retrieval"
+                and candidate["area"] == "Venous Interventions"
+                and candidate["type"] == "Venous foreign body retrieval"
+                and candidate["acgme_def_category"] == "Venous Intervention"
+                for candidate in checked
+            )
+        )
+
+    def test_approve_checked_candidates_creates_entries_and_rejects_unchecked(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        raw = {
+            "Accession Number": "202601030001",
+            "Modality": "US",
+            "Exam Code": "USGUDPARAC",
+            "Exam Description": "US GUIDED PARACENTESIS",
+            "CPT Code": "49083",
+            "Report Text": (
+                "ULTRASOUND-GUIDED PARACENTESIS\n\n"
+                "PROCEDURE PERSONNEL:\n"
+                "Attending: Example Attending\n"
+                "Other: Cody Key\n\n"
+                "FINDINGS/IMPRESSION:\n"
+                "1. Successful ultrasound-guided paracentesis.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-03 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        source = transform_mpower_row(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
+        candidates = build_match_candidates(source)
+        store_match_candidates(conn, source_id, candidates)
+        add_manual_candidate(conn, source_id, search_acgme_targets("biopsy")[0])
+        rows = load_candidates(conn, source_id)
+        checked = {int(row["id"]) for row in rows if row["type"] == "Paracentesis"}
+        self.assertTrue(checked)
+        approve_candidate_review(conn, source_id, checked)
+        generated = conn.execute("SELECT acgme_code, type, review_status FROM generated_entries WHERE source_case_id = ?", (source_id,)).fetchall()
+        self.assertEqual([row["type"] for row in generated], ["Paracentesis"])
+        self.assertEqual(generated[0]["acgme_code"], "31896")
+        self.assertEqual(generated[0]["review_status"], "approved")
+        statuses = {
+            row["user_status"]
+            for row in conn.execute("SELECT user_status FROM source_match_candidates WHERE source_case_id = ?", (source_id,))
+        }
+        self.assertTrue({"accepted", "rejected"} <= statuses)
+        signal_count = conn.execute("SELECT COUNT(*) FROM mapping_learning_signals WHERE source_case_id = ?", (source_id,)).fetchone()[0]
+        self.assertGreaterEqual(signal_count, 2)
+
+    def test_candidate_queue_lazily_creates_candidates(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        raw = {
+            "Accession Number": "202601040001",
+            "Modality": "US",
+            "Exam Code": "USGUDPARAC",
+            "Exam Description": "US GUIDED PARACENTESIS",
+            "CPT Code": "49083",
+            "Report Text": (
+                "ULTRASOUND-GUIDED PARACENTESIS\n\n"
+                "PROCEDURE PERSONNEL:\n"
+                "Attending: Example Attending\n"
+                "Other: Cody Key\n\n"
+                "FINDINGS/IMPRESSION:\n"
+                "1. Successful ultrasound-guided paracentesis.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-04 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        source = transform_mpower_row(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
+        entries, _ = map_source_case(source, *load_mapping_rules())
+        insert_generated_entries(conn, source_id, entries)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM source_match_candidates").fetchone()[0], 0)
+        queued_source, candidates = load_next_candidate_group(conn)
+        self.assertEqual(queued_source["id"], source_id)
+        self.assertTrue(candidates)
+        self.assertGreater(conn.execute("SELECT COUNT(*) FROM source_match_candidates").fetchone()[0], 0)
 
     def test_import_mpower_csv_dedupes_exact_hash_and_persists_parsed_json(self) -> None:
         conn = sqlite3.connect(":memory:")
@@ -212,6 +575,46 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(source["source_row_number"], 2)
         self.assertEqual(source["duplicate_accession_flag"], 1)
         self.assertEqual(json.loads(source["parsed_report_json"])["procedure_title"], "Example procedure")
+
+    def test_import_mpower_csv_persists_after_commit_and_reopen(self) -> None:
+        row = {
+            "Accession Number": "202601010002",
+            "Modality": "IR",
+            "Exam Code": "IRUNKNOWN",
+            "Exam Description": "IR EXAMPLE PROCEDURE",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Example procedure\n\n"
+                "Procedural Personnel\n"
+                "Attending physician(s): Example Attending, MD\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful example procedure.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-01 11:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "case_logs.sqlite"
+            csv_path = Path(tmp) / "mpower.csv"
+            with csv_path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            import_mpower_csv(conn, csv_path)
+            conn.commit()
+            conn.close()
+
+            reopened = sqlite3.connect(db_path)
+            reopened.row_factory = sqlite3.Row
+            stored = reopened.execute("SELECT source_format, parsed_report_json FROM source_cases").fetchone()
+            reopened.close()
+        self.assertEqual(stored["source_format"], "mpower_csv")
+        self.assertEqual(json.loads(stored["parsed_report_json"])["procedure_title"], "Example procedure")
 
     def test_port_removal_targets_exact_acgme_row(self) -> None:
         raw = {

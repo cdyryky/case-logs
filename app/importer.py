@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config_io import load_resident_profile
-from .mapper import load_mapping_rules, map_source_case
+from .mapper import load_mapping_rules, map_source_case, validate_rules
 from .models import init_db, log_event, utc_now
 from .parser import iter_mpower_raw_rows, iter_raw_rows, transform_mpower_row, transform_source_row
 from .utils import file_sha256
@@ -130,18 +130,18 @@ def insert_generated_entries(
             """
             INSERT OR IGNORE INTO generated_entries(
               source_case_id, dedupe_key, component_label, case_id, case_date, case_year, role, site,
-              patient_type, case_class, area, type, acgme_description, acgme_def_category, keyword, comments, mapping_rule_id,
+              patient_type, case_class, acgme_code, area, type, acgme_description, acgme_def_category, keyword, comments, mapping_rule_id,
               mapping_rule_version, mapping_rules_file_hash, mapping_rule_name, mapping_confidence,
               role_confidence, compound_flag, review_status, upload_status, created_at, updated_at
             )
             VALUES (
               :source_case_id, :dedupe_key, :component_label, :case_id, :case_date, :case_year, :role, :site,
-              :patient_type, :case_class, :area, :type, :acgme_description, :acgme_def_category, :keyword, :comments, :mapping_rule_id,
+              :patient_type, :case_class, :acgme_code, :area, :type, :acgme_description, :acgme_def_category, :keyword, :comments, :mapping_rule_id,
               :mapping_rule_version, :mapping_rules_file_hash, :mapping_rule_name, :mapping_confidence,
               :role_confidence, :compound_flag, :review_status, 'not_uploaded', :created_at, :updated_at
             )
             """,
-            {**entry, "source_case_id": source_case_id, "created_at": now, "updated_at": now},
+            {**entry, "acgme_code": entry.get("acgme_code", ""), "source_case_id": source_case_id, "created_at": now, "updated_at": now},
         )
         if cur.rowcount == 1:
             count += 1
@@ -155,6 +155,7 @@ def import_xlsx(conn: sqlite3.Connection, xlsx_path: str | Path) -> dict[str, in
     path = Path(xlsx_path)
     profile = load_resident_profile()
     rules, rules_hash = load_mapping_rules()
+    validate_rules(rules)
     file_hash = file_sha256(path)
     import_cur = conn.execute(
         """
@@ -172,7 +173,7 @@ def import_xlsx(conn: sqlite3.Connection, xlsx_path: str | Path) -> dict[str, in
         source_case_id, inserted = insert_source_case(conn, source, path.name, import_id)
         new_count += int(inserted)
         duplicate_count += int(not inserted)
-        entries, source_update = map_source_case(source, rules, rules_hash)
+        entries, source_update = map_source_case(source, rules, rules_hash, validate=False)
         update_source_mapping_status(conn, source_case_id, source_update)
         generated_count += insert_generated_entries(conn, source_case_id, entries)
 
@@ -199,6 +200,7 @@ def import_mpower_csv(conn: sqlite3.Connection, csv_path: str | Path) -> dict[st
     path = Path(csv_path)
     profile = load_resident_profile()
     rules, rules_hash = load_mapping_rules()
+    validate_rules(rules)
     file_hash = file_sha256(path)
     import_cur = conn.execute(
         """
@@ -222,7 +224,7 @@ def import_mpower_csv(conn: sqlite3.Connection, csv_path: str | Path) -> dict[st
         source_case_id, inserted = insert_source_case(conn, source, path.name, import_id)
         new_count += int(inserted)
         duplicate_count += int(not inserted)
-        entries, source_update = map_source_case(source, rules, rules_hash)
+        entries, source_update = map_source_case(source, rules, rules_hash, validate=False)
         update_source_mapping_status(conn, source_case_id, source_update)
         generated_count += insert_generated_entries(conn, source_case_id, entries)
 

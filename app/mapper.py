@@ -153,6 +153,7 @@ def _build_generated_entry(
             source["accession_number"],
             derived["case_date"],
             target.case_class,
+            getattr(target, "acgme_code", ""),
             target.area,
             target.type,
             target.acgme_description,
@@ -169,6 +170,7 @@ def _build_generated_entry(
         "site": derived["site"],
         "patient_type": derived["patient_type"],
         "case_class": target.case_class,
+        "acgme_code": getattr(target, "acgme_code", ""),
         "area": target.area,
         "type": target.type,
         "acgme_description": target.acgme_description,
@@ -191,9 +193,11 @@ def map_source_case(
     rules: list[MappingRule],
     mapping_rules_file_hash: str,
     dropdowns: dict[str, Any] | None = None,
+    validate: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     dropdown_config = dropdowns or load_dropdowns()
-    validate_rules(rules, dropdown_config)
+    if validate:
+        validate_rules(rules, dropdown_config)
     generated: list[dict[str, Any]] = []
     source_update = {"source_mapping_status": "unmapped", "needs_review_reason": source.get("needs_review_reason") or ""}
 

@@ -1,6 +1,6 @@
 # ACGME IR Case Log Automation
 
-Local-first tooling to convert a Visage/mPower IR XLSX export into reviewed ACGME case-log entries and autofill the ACGME Add Cases form through a Chrome extension.
+Local-first tooling to convert an mPower IR CSV export into reviewed ACGME case-log entries and autofill the ACGME Add Cases form through a Chrome extension.
 
 ## Quick Start
 
@@ -26,7 +26,7 @@ For first-time data prep, run:
 ```bash
 . .venv/bin/activate
 python scripts/normalize_dropdowns.py
-python -m app.cli import-xlsx visage-data-export.xlsx
+python -m app.cli import-mpower-csv data/exports/mpower-download-260526-clean.csv
 ```
 
 Load `extension/` as an unpacked Chrome extension, log into ACGME normally, open Add Cases, then use the extension popup to preview, fill, and mark cases submitted. Keep `./scripts/start_local.sh` running while using the extension.
@@ -38,7 +38,7 @@ The app stores only the source fields needed for case logging and review. `Patie
 ## Core Workflow
 
 ```text
-Visage/mPower XLSX
+mPower CSV
 -> SQLite source_cases
 -> mapping_rules.csv
 -> generated_entries

@@ -5,8 +5,9 @@ from typing import Any
 
 from .config_io import load_resident_profile
 from .constants import DEFAULT_CASE_CLASS, DEFAULT_SITE
+from .candidates import ensure_candidates_for_source, load_candidates
 from .importer import insert_generated_entries, update_source_mapping_status
-from .mapper import load_mapping_rules, map_source_case
+from .mapper import load_mapping_rules, map_source_case, validate_rules
 from .matching import suggest_mappings
 from .utils import case_year_from_date, format_acgme_date, patient_type, patient_type_from_age
 
@@ -69,7 +70,7 @@ def source_row_to_mapping_source(row: sqlite3.Row, profile: dict[str, Any] | Non
 
 
 def review_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    counts = {
+    return {
         "batch_approvable": conn.execute(
             """
             SELECT COUNT(*) FROM generated_entries
@@ -82,9 +83,17 @@ def review_counts(conn: sqlite3.Connection) -> dict[str, int]:
         ).fetchone()[0],
         "needs_review": conn.execute(
             """
-            SELECT COUNT(DISTINCT source_case_id) FROM generated_entries
-            WHERE review_status IN ('new_high_confidence', 'needs_review')
-              AND upload_status IN ('not_uploaded', 'reset')
+            SELECT COUNT(DISTINCT source_case_id)
+            FROM (
+              SELECT source_case_id
+              FROM source_match_candidates
+              WHERE user_status = 'pending'
+              UNION
+              SELECT source_case_id
+              FROM generated_entries
+              WHERE review_status IN ('new_high_confidence', 'needs_review')
+                AND upload_status IN ('not_uploaded', 'reset')
+            )
             """
         ).fetchone()[0],
         "upload_failures": conn.execute(
@@ -94,22 +103,6 @@ def review_counts(conn: sqlite3.Connection) -> dict[str, int]:
             "SELECT COUNT(*) FROM source_cases WHERE source_mapping_status IN ('unmapped', 'flag_only')"
         ).fetchone()[0],
     }
-    with_suggestions = 0
-    rules, _ = load_mapping_rules()
-    rows = conn.execute(
-        """
-        SELECT * FROM source_cases
-        WHERE source_mapping_status IN ('unmapped', 'flag_only')
-        ORDER BY study_date DESC
-        LIMIT 250
-        """
-    ).fetchall()
-    for row in rows:
-        if suggest_mappings(source_row_to_mapping_source(row), rules, limit=1):
-            with_suggestions += 1
-    counts["unmapped_with_suggestions"] = with_suggestions
-    counts["unmapped_without_suggestions"] = max(counts["unmapped_total"] - with_suggestions, 0)
-    return counts
 
 
 def load_next_generated_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
@@ -141,6 +134,53 @@ def load_next_generated_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | N
     return source, entries
 
 
+def load_next_candidate_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    source = conn.execute(
+        """
+        SELECT sc.*
+        FROM source_cases sc
+        WHERE EXISTS (
+          SELECT 1
+          FROM source_match_candidates smc
+          WHERE smc.source_case_id = sc.id
+            AND smc.user_status = 'pending'
+        )
+          AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
+        ORDER BY sc.study_date DESC, sc.id
+        LIMIT 1
+        """
+    ).fetchone()
+    if not source:
+        source = conn.execute(
+            """
+            SELECT sc.*
+            FROM source_cases sc
+            JOIN generated_entries ge ON ge.source_case_id = sc.id
+            WHERE ge.review_status IN ('new_high_confidence', 'needs_review')
+              AND ge.upload_status IN ('not_uploaded', 'reset')
+              AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
+            ORDER BY
+              CASE ge.review_status WHEN 'needs_review' THEN 0 ELSE 1 END,
+              ge.id
+            LIMIT 1
+            """
+        ).fetchone()
+    if not source:
+        source = conn.execute(
+            """
+            SELECT sc.*
+            FROM source_cases sc
+            WHERE sc.source_mapping_status IN ('unmapped', 'flag_only')
+            ORDER BY sc.study_date DESC, sc.id
+            LIMIT 1
+            """
+        ).fetchone()
+    if not source:
+        return None, []
+    ensure_candidates_for_source(conn, source)
+    return source, load_candidates(conn, int(source["id"]))
+
+
 def load_next_unmapped(conn: sqlite3.Connection, require_suggestion: bool | None = None) -> tuple[sqlite3.Row | None, list[dict[str, Any]]]:
     rules, _ = load_mapping_rules()
     rows = conn.execute(
@@ -167,6 +207,7 @@ def load_next_unmapped(conn: sqlite3.Connection, require_suggestion: bool | None
 
 def remap_unresolved_cases(conn: sqlite3.Connection, limit: int | None = None) -> dict[str, int]:
     rules, rules_hash = load_mapping_rules()
+    validate_rules(rules)
     sql = """
         SELECT * FROM source_cases
         WHERE source_mapping_status IN ('unmapped', 'flag_only')
@@ -179,7 +220,7 @@ def remap_unresolved_cases(conn: sqlite3.Connection, limit: int | None = None) -
     for row in rows:
         summary["checked"] += 1
         source = source_row_to_mapping_source(row)
-        entries, update = map_source_case(source, rules, rules_hash)
+        entries, update = map_source_case(source, rules, rules_hash, validate=False)
         if entries:
             inserted = insert_generated_entries(conn, row["id"], entries)
             update_source_mapping_status(conn, row["id"], update)

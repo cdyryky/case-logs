@@ -170,6 +170,7 @@ def init_db(conn: sqlite3.Connection) -> None:
           site TEXT NOT NULL,
           patient_type TEXT NOT NULL,
           case_class TEXT NOT NULL,
+          acgme_code TEXT,
           area TEXT NOT NULL,
           type TEXT NOT NULL,
           acgme_description TEXT,
@@ -222,6 +223,55 @@ def init_db(conn: sqlite3.Connection) -> None:
           FOREIGN KEY(entry_id) REFERENCES generated_entries(id)
         );
 
+        CREATE TABLE IF NOT EXISTS source_match_candidates (
+          id INTEGER PRIMARY KEY,
+          source_case_id INTEGER NOT NULL,
+          candidate_key TEXT NOT NULL UNIQUE,
+          case_class TEXT NOT NULL,
+          acgme_code TEXT,
+          area TEXT NOT NULL,
+          type TEXT NOT NULL,
+          acgme_description TEXT,
+          acgme_def_category TEXT,
+          keyword TEXT,
+          component_label TEXT NOT NULL,
+          score REAL NOT NULL,
+          confidence TEXT NOT NULL,
+          default_checked INTEGER NOT NULL DEFAULT 0,
+          user_checked INTEGER,
+          user_status TEXT NOT NULL DEFAULT 'pending',
+          match_reason TEXT,
+          matched_phrases_json TEXT,
+          evidence_snippet TEXT,
+          event_key TEXT,
+          event_label TEXT,
+          source_kind TEXT NOT NULL,
+          algorithm_version TEXT NOT NULL,
+          learning_weight REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(source_case_id) REFERENCES source_cases(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS mapping_learning_signals (
+          id INTEGER PRIMARY KEY,
+          source_case_id INTEGER NOT NULL,
+          candidate_id INTEGER,
+          signal_type TEXT NOT NULL,
+          learning_weight REAL NOT NULL,
+          exam_code TEXT,
+          procedure_text TEXT,
+          case_class TEXT NOT NULL,
+          area TEXT NOT NULL,
+          type TEXT NOT NULL,
+          acgme_description TEXT,
+          acgme_def_category TEXT,
+          evidence_json TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(source_case_id) REFERENCES source_cases(id),
+          FOREIGN KEY(candidate_id) REFERENCES source_match_candidates(id)
+        );
+
         CREATE TABLE IF NOT EXISTS upload_session (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           current_entry_id INTEGER,
@@ -253,10 +303,32 @@ def init_db(conn: sqlite3.Connection) -> None:
           ON source_cases(accession_number);
         """
     )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_candidates_source_status
+          ON source_match_candidates(source_case_id, user_status);
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_learning_signals_target
+          ON mapping_learning_signals(exam_code, area, type);
+        """
+    )
+    ensure_columns(
+        conn,
+        "source_match_candidates",
+        {
+            "acgme_code": "TEXT",
+            "event_key": "TEXT",
+            "event_label": "TEXT",
+        },
+    )
     ensure_columns(
         conn,
         "generated_entries",
         {
+            "acgme_code": "TEXT",
             "acgme_description": "TEXT",
             "acgme_def_category": "TEXT",
         },

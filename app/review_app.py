@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -9,11 +11,13 @@ import streamlit as st
 from app.config_io import load_dropdowns
 from app.config_io import load_resident_profile
 from app.constants import DEFAULT_CASE_CLASS, DEFAULT_DB_PATH, DEFAULT_SITE
+from app.candidates import add_manual_candidate, approve_candidate_review, search_acgme_targets
 from app.export_payload import export_approved_json
 from app.importer import import_mpower_csv, import_xlsx
 from app.learning import append_learned_rule, apply_mapping_to_matching_unsubmitted, learned_rule_count
 from app.models import connect, init_db, log_event, utc_now
 from app.review_queue import (
+    load_next_candidate_group,
     load_next_generated_group,
     load_next_unmapped,
     remap_unresolved_cases,
@@ -21,6 +25,8 @@ from app.review_queue import (
     source_row_to_mapping_source,
 )
 from app.utils import case_year_from_date, canonical_key, format_acgme_date, patient_type
+
+DEFAULT_MPOWER_CSV_PATH = "data/exports/mpower-download-260526-clean.csv"
 
 
 def get_conn() -> sqlite3.Connection:
@@ -66,7 +72,7 @@ def load_entries(conn: sqlite3.Connection, filter_name: str) -> pd.DataFrame:
                ge.acgme_description, ge.acgme_def_category,
                ge.component_label, ge.mapping_confidence, ge.role_confidence, ge.compound_flag,
                ge.review_status, ge.upload_status, ge.mapping_rule_name, ge.failure_reason,
-               sc.exam_code, sc.procedure_text, sc.study_description, sc.attending_name,
+               sc.exam_code, sc.procedure_text, sc.study_description, sc.attending_name, sc.parsed_report_json,
                sc.resident_found_in_report, sc.resident_position, sc.needs_review_reason
         FROM generated_entries ge
         JOIN source_cases sc ON sc.id = ge.source_case_id
@@ -75,6 +81,62 @@ def load_entries(conn: sqlite3.Connection, filter_name: str) -> pd.DataFrame:
         """,
         conn,
     )
+    return add_parsed_report_preview(df)
+
+
+def parse_report_json(value: object) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def compact_lines(value: object, limit: int = 4) -> str:
+    if not value:
+        return ""
+    if isinstance(value, list):
+        lines = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        lines = [line.strip() for line in str(value).splitlines() if line.strip()]
+    return " | ".join(lines[:limit])
+
+
+def summary_preview(parsed: dict[str, Any], limit: int = 6) -> str:
+    values: list[str] = []
+    for section in parsed.get("procedure_summary_sections") or []:
+        if not isinstance(section, dict):
+            continue
+        for line in section.get("bullets") or section.get("lines") or []:
+            text = str(line).strip()
+            if text and text.lower() != "additional procedure(s): none":
+                values.append(text)
+        for line in section.get("additional_procedures") or []:
+            text = str(line).strip()
+            if text:
+                values.append(f"Additional: {text}")
+    return " | ".join(list(dict.fromkeys(values))[:limit])
+
+
+def candidate_preview(parsed: dict[str, Any], limit: int = 8) -> str:
+    values = [str(item).strip() for item in parsed.get("candidate_procedure_phrases") or [] if str(item).strip()]
+    return " | ".join(values[:limit])
+
+
+def add_parsed_report_preview(df: pd.DataFrame) -> pd.DataFrame:
+    if "parsed_report_json" not in df.columns or df.empty:
+        return df
+    out = df.copy()
+    parsed_values = out["parsed_report_json"].map(parse_report_json)
+    out["parsed_procedure_title"] = parsed_values.map(lambda p: p.get("procedure_title", ""))
+    out["impression"] = parsed_values.map(lambda p: compact_lines(p.get("impression"), 4))
+    out["procedure_summary"] = parsed_values.map(summary_preview)
+    out["candidate_procedure_phrases"] = parsed_values.map(candidate_preview)
+    out["parse_warnings"] = parsed_values.map(lambda p: ", ".join(p.get("parse_warnings") or []))
+    out = out.drop(columns=["parsed_report_json"])
+    return out
 
 
 def update_review_status(conn: sqlite3.Connection, ids: list[int], status: str, source: str = "review_app") -> None:
@@ -200,11 +262,11 @@ def create_manual_entry(conn: sqlite3.Connection, source_case_id: int, values: d
         """
         INSERT INTO generated_entries(
           source_case_id, dedupe_key, component_label, case_id, case_date, case_year, role, site,
-          patient_type, case_class, area, type, acgme_description, acgme_def_category, keyword, comments, mapping_rule_id,
+          patient_type, case_class, acgme_code, area, type, acgme_description, acgme_def_category, keyword, comments, mapping_rule_id,
           mapping_rule_version, mapping_rules_file_hash, mapping_rule_name, mapping_confidence,
           role_confidence, compound_flag, review_status, upload_status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', '1', 'manual', 'Manual entry',
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', '1', 'manual', 'Manual entry',
                 'low', 'low', 0, 'edited', 'not_uploaded', ?, ?)
         """,
         (
@@ -222,6 +284,7 @@ def create_manual_entry(conn: sqlite3.Connection, source_case_id: int, values: d
             values["site"],
             values["patient_type"],
             values["case_class"],
+            values.get("acgme_code", ""),
             values["area"],
             values["type"],
             values.get("acgme_description", ""),
@@ -277,6 +340,7 @@ def default_values_for_source(source: sqlite3.Row) -> dict[str, object]:
 def source_context(source: sqlite3.Row) -> None:
     mapping_source = source_row_to_mapping_source(source)
     derived = mapping_source["derived"]
+    parsed = parse_report_json(source["parsed_report_json"] if "parsed_report_json" in source.keys() else None)
     st.subheader(f"{source['procedure_text'] or source['study_description'] or 'Unlabeled case'}")
     c1, c2, c3, c4 = st.columns(4)
     c1.caption("Date")
@@ -292,6 +356,129 @@ def source_context(source: sqlite3.Row) -> None:
     )
     if source["needs_review_reason"]:
         st.warning(source["needs_review_reason"])
+    if parsed:
+        st.markdown("**Parsed Report**")
+        if parsed.get("procedure_title"):
+            st.write(f"Procedure title: {parsed['procedure_title']}")
+        if parsed.get("impression"):
+            st.caption("Impression")
+            st.text(parsed["impression"])
+        summaries = parsed.get("procedure_summary_sections") or []
+        if summaries:
+            st.caption("Procedure summary")
+            for section in summaries:
+                heading = section.get("heading") or "PROCEDURE SUMMARY"
+                lines = section.get("bullets") or section.get("lines") or []
+                visible = [line for line in lines if str(line).strip()]
+                if visible:
+                    st.write(f"{heading}:")
+                    st.markdown("\n".join(f"- {line}" for line in visible))
+                additional = [line for line in section.get("additional_procedures") or [] if str(line).strip()]
+                if additional:
+                    st.write("Additional procedures:")
+                    st.markdown("\n".join(f"- {line}" for line in additional))
+        candidates = parsed.get("candidate_procedure_phrases") or []
+        if candidates:
+            with st.expander("Candidate procedure phrases"):
+                st.markdown("\n".join(f"- {phrase}" for phrase in candidates[:40]))
+
+
+def candidate_label(candidate: sqlite3.Row) -> str:
+    return candidate["acgme_description"] or candidate["type"]
+
+
+def candidate_metadata(candidate: sqlite3.Row) -> str:
+    parts = []
+    if "acgme_code" in candidate.keys() and candidate["acgme_code"]:
+        parts.append(str(candidate["acgme_code"]))
+    parts.append(f"{candidate['area']} / {candidate['type']}")
+    if candidate["acgme_def_category"]:
+        parts.append(f"Def Cat: {candidate['acgme_def_category']}")
+    return " | ".join(parts)
+
+
+def _candidate_event_label(candidate: sqlite3.Row) -> str:
+    if "event_label" in candidate.keys() and candidate["event_label"]:
+        return str(candidate["event_label"])
+    return "Other suggestions"
+
+
+def _render_candidate_checks(rows: list[sqlite3.Row], default_checked: bool) -> set[int]:
+    selected_ids: set[int] = set()
+    grouped: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        grouped.setdefault(_candidate_event_label(row), []).append(row)
+    for event_label, event_rows in grouped.items():
+        if event_label != "Other suggestions":
+            st.caption(f"Procedure event: {event_label}")
+        for row in event_rows:
+            checked = st.checkbox(
+                candidate_label(row),
+                value=default_checked,
+                key=f"candidate_checked_{row['id']}",
+                help=row["evidence_snippet"] or row["match_reason"] or None,
+            )
+            st.caption(f"{candidate_metadata(row)} · {row['confidence']} {row['score']:.2f} - {row['match_reason'] or ''}")
+            if checked:
+                selected_ids.add(int(row["id"]))
+    return selected_ids
+
+
+def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candidates: list[sqlite3.Row]) -> None:
+    selected_ids: set[int] = set()
+    initially_selected_ids = {
+        int(row["id"])
+        for row in candidates
+        if int(row["user_checked"] if row["user_checked"] is not None else row["default_checked"])
+    }
+    selected = [
+        row
+        for row in candidates
+        if int(row["id"]) in initially_selected_ids
+    ]
+    possible = [row for row in candidates if int(row["id"]) not in initially_selected_ids]
+
+    st.markdown("**Selected mappings**")
+    if not selected:
+        st.caption("No mappings are currently selected.")
+    selected_ids.update(_render_candidate_checks(selected, True))
+
+    with st.expander("Possible matches", expanded=bool(possible)):
+        if not possible:
+            st.caption("No additional possible matches.")
+        selected_ids.update(_render_candidate_checks(possible, False))
+
+    st.markdown("**Search ACGME procedures**")
+    query = st.text_input("Search by description, type, area, or def cat", key=f"acgme_search_{source['id']}")
+    results = search_acgme_targets(query) if query else []
+    checked_results: list[dict[str, object]] = []
+    if results:
+        for idx, target in enumerate(results[:10]):
+            checked = st.checkbox(
+                target["label"],
+                value=False,
+                key=f"acgme_search_result_{source['id']}_{idx}_{target.get('acgme_code', '')}_{target['area']}_{target['type']}_{target.get('acgme_description', '')}",
+            )
+            if checked:
+                checked_results.append(target)
+        if checked_results and st.button("Add checked search results", key=f"add_candidate_{source['id']}"):
+            for target in checked_results:
+                add_manual_candidate(conn, int(source["id"]), target)
+            conn.commit()
+            st.rerun()
+    elif query:
+        st.caption("No official ACGME targets matched that search.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Approve checked", type="primary", key=f"approve_candidates_{source['id']}"):
+            inserted = approve_candidate_review(conn, int(source["id"]), selected_ids)
+            st.success(f"Approved {len(selected_ids)} mappings; created {inserted} new entries.")
+            st.rerun()
+    with c2:
+        if st.button("Reject all / skip case", key=f"reject_candidates_{source['id']}"):
+            approve_candidate_review(conn, int(source["id"]), set())
+            st.rerun()
 
 
 def mapping_form(
@@ -366,10 +553,10 @@ def mark_before_date(conn: sqlite3.Connection, cutoff: str, mode: str) -> int:
 
 
 def load_unmapped(conn: sqlite3.Connection) -> pd.DataFrame:
-    return pd.read_sql_query(
+    df = pd.read_sql_query(
         """
         SELECT id, accession_number, study_date, exam_code, procedure_text, study_description,
-               source_mapping_status, needs_review_reason, attending_name
+               source_mapping_status, needs_review_reason, attending_name, parsed_report_json
         FROM source_cases
         WHERE source_mapping_status IN ('unmapped', 'flag_only')
         ORDER BY study_date DESC
@@ -377,6 +564,7 @@ def load_unmapped(conn: sqlite3.Connection) -> pd.DataFrame:
         """,
         conn,
     )
+    return add_parsed_report_preview(df)
 
 
 st.set_page_config(page_title="ACGME IR Case Logs", layout="wide")
@@ -387,9 +575,9 @@ conn = get_conn()
 
 with st.sidebar:
     st.header("Import")
-    uploaded = st.file_uploader("Visage XLSX or mPower CSV", type=["xlsx", "csv"])
-    import_path = st.text_input("Or local import path", "data/exports/mpower-download-260526-clean.csv")
-    if st.button("Import file", type="primary"):
+    import_path = st.text_input("Default mPower CSV", DEFAULT_MPOWER_CSV_PATH)
+    uploaded = st.file_uploader("Optional alternate import file", type=["csv", "xlsx"])
+    if st.button("Import mPower CSV", type="primary"):
         path: str | Path
         if uploaded:
             tmp = Path("data/imports") / uploaded.name
@@ -401,6 +589,7 @@ with st.sidebar:
         with st.spinner("Importing and mapping cases..."):
             suffix = Path(path).suffix.lower()
             summary = import_mpower_csv(conn, path) if suffix == ".csv" else import_xlsx(conn, path)
+            conn.commit()
         st.success(f"Imported {summary['row_count']} rows; generated {summary['generated_entries_count']} entries.")
 
     st.header("Export")
@@ -422,12 +611,11 @@ tab_review, tab_diagnostics, tab_imports = st.tabs(["Review Queue", "Diagnostics
 
 with tab_review:
     counts = review_counts(conn)
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("Batch approvable", counts["batch_approvable"])
     m2.metric("Needs review", counts["needs_review"])
-    m3.metric("Unmapped suggestions", counts["unmapped_with_suggestions"])
-    m4.metric("Unmapped no suggestion", counts["unmapped_without_suggestions"])
-    m5.metric("Upload failures", counts["upload_failures"])
+    m3.metric("Unmapped", counts["unmapped_total"])
+    m4.metric("Upload failures", counts["upload_failures"])
 
     qc1, qc2 = st.columns([2, 1])
     with qc1:
@@ -454,51 +642,30 @@ with tab_review:
             st.rerun()
 
     if queue == "Needs review":
-        source, entries = load_next_generated_group(conn)
+        source, candidates = load_next_candidate_group(conn)
         if not source:
-            st.info("No generated entries need review.")
+            st.info("No candidate mappings need review.")
         else:
             source_context(source)
-            rows = [
-                {
-                    "id": row["id"],
-                    "role": row["role"],
-                    "area": row["area"],
-                    "type": row["type"],
-                    "description": row["acgme_description"],
-                    "def_cat": row["acgme_def_category"],
-                    "confidence": row["mapping_confidence"],
-                    "reason": row["comments"] or row["mapping_rule_name"],
-                }
-                for row in entries
-            ]
-            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-            ids = [int(row["id"]) for row in entries]
-            a1, a2 = st.columns(2)
-            with a1:
-                if st.button("Approve", type="primary"):
-                    update_review_status(conn, ids, "approved")
-                    st.rerun()
-            with a2:
-                if st.button("Skip"):
-                    update_review_status(conn, ids, "skipped")
-                    st.rerun()
+            candidate_review_card(conn, source, candidates)
 
-            with st.expander("Edit"):
-                labels = [f"{row['id']}: {row['area']} / {row['type']}" for row in entries]
-                selected_label = st.selectbox("Entry", labels)
-                selected_id = int(selected_label.split(":", 1)[0])
-                selected = next(row for row in entries if int(row["id"]) == selected_id)
-                defaults = dict(selected)
-                submitted, values, learn, apply_now = mapping_form("review_edit_form", defaults, "Save")
-                if submitted:
-                    save_entry_edit(conn, selected_id, values)
-                    message = "Entry saved."
-                    if learn:
-                        rule_id, applied = learn_from_generated_entry(conn, selected_id, values, apply_now)
-                        message += f" Learned `{rule_id}`; applied to {applied} matching entries."
-                    st.success(message)
-                    st.rerun()
+            legacy_source, entries = load_next_generated_group(conn)
+            if legacy_source and int(legacy_source["id"]) == int(source["id"]) and entries:
+                with st.expander("Legacy generated entries"):
+                    rows = [
+                        {
+                            "id": row["id"],
+                            "role": row["role"],
+                            "area": row["area"],
+                            "type": row["type"],
+                            "description": row["acgme_description"],
+                            "def_cat": row["acgme_def_category"],
+                            "confidence": row["mapping_confidence"],
+                            "reason": row["comments"] or row["mapping_rule_name"],
+                        }
+                        for row in entries
+                    ]
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     elif queue in {"Unmapped with suggestions", "Unmapped without suggestions"}:
         source, suggestions = load_next_unmapped(conn, require_suggestion=queue == "Unmapped with suggestions")

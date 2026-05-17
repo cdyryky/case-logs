@@ -1,0 +1,366 @@
+Code,Description,Defined Category,Area,Type
+31691,Stent graft thoracic aorta,Aortic Stent Grafting,Arterial Interventions,Aortic stent grafting
+31692,Straight tube stent graft abdominal aorta,Aortic Stent Grafting,Arterial Interventions,Aortic stent grafting
+31693,Aorto-uniateral-iliac-graft,Aortic Stent Grafting,Arterial Interventions,Aortic stent grafting
+31694,Abdominal aortic stent graft w/bilateral iliac extension,Aortic Stent Grafting,Arterial Interventions,Aortic stent grafting
+31695,Iliac artery repair with stent graft,Aortic Stent Grafting,Arterial Interventions,Aortic stent grafting
+31652,PTA aorta,Arterial PTA or Stent,Arterial Interventions,Arterial PTA
+31653,PTA lower extremity artery,Arterial PTA or Stent,Arterial Interventions,Arterial PTA
+31654,PTA artery upper extremity,Arterial PTA or Stent,Arterial Interventions,Arterial PTA
+31655,PTA artery neuro,Arterial PTA or Stent,Arterial Interventions,Arterial PTA
+31656,PTA artery visceral,Arterial PTA or Stent,Arterial Interventions,Arterial PTA
+31657,Atherectomy - aorta,Arterial PTA or Stent,Arterial Interventions,Arterial atherectomy
+31658,Atherectomy - lower extremity artery,Arterial PTA or Stent,Arterial Interventions,Arterial atherectomy
+31659,Atherectomy - upper extremity artery,Arterial PTA or Stent,Arterial Interventions,Arterial atherectomy
+31660,Atherectomy - visceral artery,Arterial PTA or Stent,Arterial Interventions,Arterial atherectomy
+31661,Stent - aorta,Arterial PTA or Stent,Arterial Interventions,Arterial stent
+31662,Stent - lower extremity artery,Arterial PTA or Stent,Arterial Interventions,Arterial stent
+31663,Stent - upper extremity artery,Arterial PTA or Stent,Arterial Interventions,Arterial stent
+31664,Stent - neuro artery,Arterial PTA or Stent,Arterial Interventions,Arterial stent
+31665,Stent - visceral artery,Arterial PTA or Stent,Arterial Interventions,Arterial stent
+31759,Pulmonary artery PTA,Arterial PTA or Stent,Pulmonary Arterial Interventions,Pulmonary artery PTA
+31760,Pulmonary artery stent,Arterial PTA or Stent,Pulmonary Arterial Interventions,Pulmonary artery stent
+31686,Arterial vascular repair - pseudoaneurysm compression,Arterial vasc rep/closure; Other,Arterial Interventions,Arterial vascular repair
+31687,Arterial vascular repair - other (excluding stent graft),Arterial vasc rep/closure; Other,Arterial Interventions,Arterial vascular repair
+31688,Arterial vascular repair - pseudoaneurysm injection,Arterial vasc rep/closure; Other,Arterial Interventions,Arterial vascular repair
+31689,Arterial vascular closure,Arterial vasc rep/closure; Other,Arterial Interventions,Arterial vascular closure
+31630,Non-selective aortic angiogram,Arteriogram,Diagnostic Arteriography,Non-selective aortic angiogram
+31631,Angio upper extremity selective,Arteriogram,Diagnostic Arteriography,Selective peripheral angiogram
+31632,Angio lower extremity selective,Arteriogram,Diagnostic Arteriography,Selective peripheral angiogram
+31633,Angio inominate/subclavian selective (proximal),Arteriogram,Diagnostic Arteriography,Selective neuro/spinal angiogram
+31634,Angio lumbar artery selective,Arteriogram,Diagnostic Arteriography,Selective neuro/spinal angiogram
+31635,Angio intercostal artery selective,Arteriogram,Diagnostic Arteriography,Selective neuro/spinal angiogram
+31636,Angio bonchial selective,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31637,Angio celiac selective - hepatic,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31638,Angio celiac selective - splenic,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31639,Angio celiac selective - left gastric,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31640,Angio celiac selective - gastroduodenal artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31641,Angio SMA selective,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31642,Angio renal selective,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31643,Angio hypogastric selective -uterine artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31644,Angio hypogastric selective - vesical artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31645,Angio hypogastric selective -internal pudendal artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31646,Angio hypogastric selective -prostatic artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31647,Angio hypogastric selective - obturator artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31648,Angio hypogastric selective - inferior gluteal artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31649,Angio hypogastric selective - superior gluteal artery,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31650,Angio visceral other selective,Arteriogram,Diagnostic Arteriography,Selective visceral angiogram
+31754,Pulmonary angio non-selective,Arteriogram,Pulmonary Arterial Interventions,Diagnostic pulmonary angiogram
+31755,Pulmonary angio unilateral/bilateral selective,Arteriogram,Pulmonary Arterial Interventions,Diagnostic pulmonary angiogram
+31757,Thrombolysis catheter check pulmonary artery,Arteriogram,Pulmonary Arterial Interventions,Thrombolysis catheter check pulmonary artery
+31923,Facet blockade/injection,Arthrogram/joint asp/inj,MSK Procedures,Neuro blockade/injection
+31936,Arthrogram - hip,Arthrogram/joint asp/inj,MSK Procedures,Arthrography
+31937,Arthrogram - knee,Arthrogram/joint asp/inj,Musculoskeletal Interventions/Pain Management,Arthrography
+31938,Arthrogram - ankle,Arthrogram/joint asp/inj,MSK Procedures,Arthrography
+31939,Arthrogram - shoulder,Arthrogram/joint asp/inj,Musculoskeletal Interventions/Pain Management,Arthrography
+31940,Arthrogram - elbow,Arthrogram/joint asp/inj,MSK Procedures,Arthrography
+31941,Arthrogram - wrist,Arthrogram/joint asp/inj,Musculoskeletal Interventions/Pain Management,Arthrography
+31942,Arthrogram - TMJ,Arthrogram/joint asp/inj,MSK Procedures,Arthrography
+32929,Aspiration - joint/bursa,Arthrogram/joint asp/inj,MSK Procedures,Aspiration musculoskeletal
+32930,Aspiration - soft tissue/extremity,Arthrogram/joint asp/inj,MSK Procedures,Aspiration musculoskeletal
+32931,Injection - steroid/other,Arthrogram/joint asp/inj,MSK Procedures,Injection musculoskeletal
+31889,Aspiration - thoracic parenchymal collection,Aspiration,Drainage Procedures,Fluid aspiration
+31890,Aspiration - mediastinal collection,Aspiration,Body Procedures,Fluid aspiration
+31891,Aspiration - retroperitoneal collection,Aspiration,Drainage Procedures,Fluid aspiration
+31892,Aspiration - intraperitoneal collection,Aspiration,Body Procedures,Fluid aspiration
+31893,Aspiration - visceral/organ collection,Aspiration,Drainage Procedures,Fluid aspiration
+31894,Aspiration - superficial collection,Aspiration,Body Procedures,Fluid aspiration
+31862,Biopsy - lung,Biopsy; Image guided bx/drainage,Biopsy,Biopsy thoracic
+31863,Biopsy - pleural,Biopsy,Body Procedures,Biopsy thoracic
+31864,Biopsy - mediastinum,Biopsy; Image guided bx/drainage,Biopsy,Biopsy thoracic
+31865,Biopsy - liver,Biopsy,Body Procedures,Biopsy abdominal
+31866,Biopsy - biliary,Biopsy; Image guided bx/drainage,Biopsy,Biopsy abdominal/retroperitoneal
+31867,Biopsy - spleen,Biopsy; Image guided bx/drainage,Biopsy,Biopsy abdominal/retroperitoneal
+31868,Biopsy - kidney,Biopsy,Body Procedures,Biopsy abdominal
+31869,Biopsy - genitourinary,Biopsy; Image guided bx/drainage,Biopsy,Biopsy abdominal/retroperitoneal
+31870,Biopsy - GI/mesenteric,Biopsy,Body Procedures,Biopsy abdominal
+31871,Biopsy - adrenal,Biopsy; Image guided bx/drainage,Biopsy,Biopsy abdominal/retroperitoneal
+31872,Biopsy - peritoneum,Biopsy,Body Procedures,Biopsy abdominal
+31873,Biopsy - soft tissue,Biopsy; Image guided bx/drainage,Biopsy,Biopsy soft tissue
+31874,Biopsy - bone,Biopsy,MSK Procedures,Biopsy musculoskeletal
+31875,Biopsy - joint,Biopsy; Image guided bx/drainage,Biopsy,Biopsy musculoskeletal
+31876,Biopsy - muscle,Biopsy,MSK Procedures,Biopsy musculoskeletal
+31877,Biopsy - bone marrow,Biopsy; Image guided bx/drainage,Biopsy,Biopsy musculoskeletal
+31878,Biopsy - spine,Biopsy,MSK Procedures,Biopsy musculoskeletal
+31880,Biopsy - cervical nodal,Biopsy; Image guided bx/drainage,Biopsy,Biopsy cervical nodal
+31881,Biopsy - cervical other,Biopsy,Body Procedures,Biopsy cervical
+31882,Biopsy - transvenous liver,Biopsy; Image guided bx/drainage,Biopsy,Biopsy transvenous
+31883,Biopsy - transvenous kidney,Biopsy; Image guided bx/drainage,Biopsy,Biopsy transvenous
+31884,Biopsy - transvenous IVC/SVC,Biopsy; Image guided bx/drainage,Biopsy,Biopsy transvenous
+31885,Biopsy - transvenous pulmonary artery,Biopsy; Image guided bx/drainage,Biopsy,Biopsy transvenous
+31886,Biopsy - lymph node,Biopsy; Image guided bx/drainage,Biopsy,Biopsy lymph node
+31887,Biopsy - other,Biopsy; Image guided bx/drainage,Biopsy,Biopsy other
+31888,Fiducial marker placement,Biopsy; Image guided bx/drainage,Biopsy,Fiducial marker placement
+32264,Biopsy - other,Biopsy,Body Procedures,Biopsy other
+32924,"MRI guided core biopsy/localization, breast",Breast biopsy; Image guided bx/drainage,Breast Procedures,"MRI guided core biopsy/localization, breast"
+32925,"Tomosynthesis/Stereotactic guided core biopsy, breast",Breast biopsy; Image guided bx/drainage,Breast Procedures,"Tomosynthesis/Stereotactic guided core biopsy, breast"
+32926,"US guided core biopsy/FNA, breast/axilla",Breast biopsy; Image guided bx/drainage,Breast Procedures,"US guided core biopsy/FNA, breast/axilla"
+32923,"Mammography guided localization, breast",Breast localization,Breast Procedures,"Mammography guided localization, breast"
+32927,"US guided localization, breast/axilla",Breast localization,Breast Procedures,"US guided localization, breast/axilla"
+31725,Venous thrombolysis catheter change,Catheter exchange,Venous Interventions,Venous thrombolysis catheter change
+31786,Venous access line change,Catheter exchange,Venous Access General,Venous access line change
+31812,Biliary tube exchange,Catheter exchange; Other,Biliary Interventions,Biliary tube maintenance
+31827,GI tube exchange,Catheter exchange,GI Intervention,GI tube maintenance general
+31828,Replace J tube,Catheter exchange,Body Procedures,GI tube maintenance general
+31829,Replace G tube,Catheter exchange,GI Intervention,GI tube maintenance general
+31830,Replace GJ tube,Catheter exchange,Body Procedures,GI tube maintenance general
+31851,Nephrostomy change,Catheter exchange,GU Intervention,GU tube/stent exchange
+31852,Nephroureteral stent change,Catheter exchange,GU Intervention,GU tube/stent exchange
+31856,Retrograde nephroureteral stent change,Catheter exchange,GU Intervention,GU tube/stent exchange
+31908,Drainage tube exchange,Catheter exchange,Body Procedures,Drainage tube exchange
+31501,Chest x-ray,Chest x-ray,Diagnostic Radiology,Chest x-ray
+31504,CT Abd/Pel,CT abd/pel,Diagnostic Radiology,CT Abd/Pel
+31502,CTA/MRA,CTA/MRA,Diagnostic Radiology,CTA/MRA
+31789,Dialysis access fistulagram,Dialysis Access,Dialysis Shunt Management,Dialysis access fistulagram
+31790,Dialysis access PTA,Dialysis Access,Dialysis Shunt Management,Dialysis access PTA
+31791,Dialysis access stent,Dialysis Access,Dialysis Shunt Management,Dialysis access stent
+31792,Dialysis access thrombectomy/thrombolysis,Dialysis Access,Dialysis Shunt Management,Dialysis access thrombectomy/thrombolysis
+31897,Drainage - chest tube,Drain Placement; Image guided bx/drainage,Drainage Procedures,Drainage tube placement
+31898,Drainage - tunneled chest tube placement,Drain Placement; Image guided bx/drainage,Body Procedures,Drainage tube placement
+31899,Drainage - pleural/venous shunt,Drain Placement; Image guided bx/drainage,Drainage Procedures,Drainage tube placement
+31900,Drainage - mediastinal tube,Drain Placement; Image guided bx/drainage,Drainage Procedures,Drainage tube placement
+31901,Drainage - retroperitoneal tube,Drain Placement; Image guided bx/drainage,Body Procedures,Drainage tube placement
+31902,Drainage - intraperitoneal tube,Drain Placement; Image guided bx/drainage,Drainage Procedures,Drainage tube placement
+31903,Drainage - peritoneum tunneled placement,Drain Placement; Image guided bx/drainage,Body Procedures,Drainage tube placement
+31904,Drainage - peritoneovenous shunt,Drain Placement; Image guided bx/drainage,Drainage Procedures,Drainage tube placement
+31905,Drainage - visceral/organ tube,Drain Placement; Image guided bx/drainage,Drainage Procedures,Drainage tube placement
+32921,Drainage - superficial/extremity tube,Drain Placement; Image guided bx/drainage,Body Procedures,Drainage tube placement
+31677,Embolization of bleeding,Embolization,Arterial Interventions,Arterial embolization
+31678,Embolization of tumor - chemoembolization,Embolization,Arterial Interventions,Arterial embolization
+31679,Embolization of tumor - bland tumor embolization,Embolization,Arterial Interventions,Arterial embolization
+31680,Embolization of tumor - radioembolization,Embolization,Arterial Interventions,Arterial embolization
+31681,Uterine artery embolization,Embolization,Arterial Interventions,Arterial embolization
+31682,Prostate artery embolization,Embolization,Arterial Interventions,Arterial embolization
+31683,Bronchial artery embolization,Embolization,Arterial Interventions,Arterial embolization
+31684,Other arterial embolization,Embolization,Arterial Interventions,Arterial embolization
+31732,Venous embolization - peripheral vein,Embolization,Venous Interventions,Venous embolization
+31733,Venous embolization - central vein,Embolization,Venous Interventions,Venous embolization
+31734,Venous embolization - visceral vein (excluding portal),Embolization,Venous Interventions,Venous embolization
+31735,Venous embolization - gonadal vein,Embolization,Venous Interventions,Venous embolization
+31736,Venous embolization - hypogastric vein,Embolization,Venous Interventions,Venous embolization
+31737,High flow vascular malformation/AVM embolization,Embolization,Venous Interventions,Vascular malformation embolization
+31738,Low flow vascular malformation/venous embolization,Embolization,Venous Interventions,Vascular malformation embolization
+31739,Lymphatic malformation embolization,Embolization,Venous Interventions,Vascular malformation embolization
+31761,Pulmonary artery embolization,Embolization,Pulmonary Arterial Interventions,Pulmonary artery embolization
+31772,Portal vein embolization,Embolization,Portal Interventions,Portal vein embolization
+31773,Portal varices embolization,Embolization,Portal Interventions,Portal varices embolization
+31774,BRTO PARTO CARTO,Embolization,Portal Interventions,BRTO (balloon-occluded retrograde transvenous obliteration)
+31800,Percutaneous cholangiography,GI/biliary Intervention; Other,Biliary Interventions,Biliary diagnostic
+31801,Catheter cholangiogram tube check,GI/biliary Intervention; Other,Biliary Interventions,Biliary diagnostic
+31805,T tube stone removal,GI/biliary Intervention; Other,Biliary Interventions,Biliary stone removal
+31806,Transhepatic stone removal,GI/biliary Intervention; Other,Biliary Interventions,Biliary stone removal
+31807,Cholecystolithotomy,GI/biliary Intervention; Other,Biliary Interventions,Biliary stone removal
+31808,Cholangioscopic stone removal,GI/biliary Intervention; Other,Biliary Interventions,Biliary stone removal
+31809,Biliary stricture dilation,GI/biliary Intervention; Other,Biliary Interventions,Biliary stricture dilation
+31810,Biliary stent placement (metal or plastic),GI/biliary Intervention; Other,Biliary Interventions,Biliary stent placement
+31811,Biliary stent removal (antegrade/retrograde),GI/biliary Intervention; Other,Biliary Interventions,Biliary stent removal
+31813,Biliary tube exchange w/internalization,GI/biliary Intervention; Other,Biliary Interventions,Biliary tube maintenance
+31823,Cecostomy,GI/biliary Intervention,GI Intervention,Cecostomy
+31824,Dilation of GI stricture,GI/biliary Intervention,GI Intervention,Dilation of GI stricture
+31825,Stent of GI stricture,GI/biliary Intervention,GI Intervention,Stent of GI stricture
+31832,Antegrade pyelogram,GU Intervention,GU Intervention,GU diagnostic pyelogram
+31833,Retrograde pyelogram,GU Intervention,GU Intervention,GU diagnostic pyelogram
+31838,Ureteronepheral stent retrograde placement,GU Intervention,GU Intervention,Ureteronepheral stent retrograde placement
+31839,Ureteral stent double J placement,GU Intervention,GU Intervention,Ureteral stent double J placement
+31840,GU stricture dilation,GU Intervention,GU Intervention,GU stricture dilation
+31841,Cystostomy tube placement,GU Intervention,GU Intervention,Cystostomy tube placement
+31842,Hysterosalpingography,GU Intervention,GU Intervention,Hystero/fallopian intervention
+31843,Fallopian tube recanalization,GU Intervention,GU Intervention,Hystero/fallopian intervention
+31844,Nephrostomy tract dilation (stone disease),GU Intervention,GU Intervention,Renal stone manipulation
+31845,Percutaneous nephro stone extraction,GU Intervention,GU Intervention,Renal stone manipulation
+31846,Percutaneous nephro lithotripsy,GU Intervention,GU Intervention,Renal stone manipulation
+31847,GU stone dissolution,GU Intervention,GU Intervention,Renal stone manipulation
+31848,Nephroscopic stone removal,GU Intervention,GU Intervention,Nephroscopy
+31849,Nephroscopic biopsy,GU Intervention,GU Intervention,Nephroscopy
+31853,Double J exchange transurethral,GU Intervention,GU Intervention,GU tube/stent exchange
+31854,Double J exchange transrenal,GU Intervention,GU Intervention,GU tube/stent exchange
+31855,Nephrostomy to nephroureteral stent,GU Intervention,GU Intervention,GU tube/stent exchange
+31859,Ureter double J removal transurethral,GU Intervention,GU Intervention,GU tube/stent removal
+31860,Ureter double J removal transrenal,GU Intervention,GU Intervention,GU tube/stent removal
+31861,Ureteral embolization,GU Intervention,GU Intervention,Ureteral embolization
+31879,Biopsy - thyroid,Image guided bx/drainage; Thyroid FNA/biopsy,Biopsy,Biopsy thyroid
+31943,Lymphangiography diagnostic,Lymphatic Intervention,Lymphatic Interventions and Other,Lymphangiography diagnostic
+31944,Lymphatic embolization peripheral,Lymphatic Intervention,Lymphatic Interventions and Other,Lymphatic embolization peripheral
+31945,Lymphatic embolization thoracic duct,Lymphatic Intervention,Lymphatic Interventions and Other,Lymphatic embolization thoracic duct
+31503,Mammography,Mammography,Diagnostic Radiology,Mammography
+31510,MRI Body,MRI body,Diagnostic Radiology,MRI Body
+31508,MRI Brain,MRI brain,Diagnostic Radiology,MRI Brain
+31507,MRI Lower Extremity Joints,MRI lower extremity,Diagnostic Radiology,MRI Lower Extremity Joints
+31511,MRI Spine,MRI spine,Diagnostic Radiology,MRI Spine
+31924,Celiac blockade,Nerve blockade/ablation,Neuro Procedures,Neuro blockade/injection
+31925,Sympathectomy,Nerve blockade/ablation,MSK Procedures,Neuro blockade/injection
+31926,Intercostal blockade,Nerve blockade/ablation,Neuro Procedures,Neuro blockade/injection
+31927,Epidural blockade,Nerve blockade/ablation,MSK Procedures,Neuro blockade/injection
+32932,Peripheral Nerve blockade/ablation,Nerve blockade/ablation,Musculoskeletal Interventions/Pain Management,Neuro blockade/injection
+32933,Peripheral nerve ablation,Nerve blockade/ablation,MSK Procedures,Neuro blockade/injection
+31952,Angio - carotid selective,Neuro dx/intervention,Neurovascular Interventions,Selective neuro angiography
+31953,Angio - vertebral selective,Neuro dx/intervention,Neurovascular Interventions,Selective neuro angiography
+31954,Angio - spinal selective,Neuro dx/intervention,Neurovascular Interventions,Selective neuro angiography
+31955,Neuro - arterial PTA,Neuro dx/intervention,Neurovascular Interventions,Neuro arterial PTA
+31956,Neuro venous PTA,Neuro dx/intervention,Neurovascular Interventions,Neuro venous PTA
+31957,Neuro - arterial stent,Neuro dx/intervention,Neurovascular Interventions,Neuro arterial stent
+31958,Neuro venous stent,Neuro dx/intervention,Neurovascular Interventions,Neuro venous stent
+31959,Neuro arterial embolization,Neuro dx/intervention,Neurovascular Interventions,Neuro arterial embolization
+31960,Neuro venous embolization,Neuro dx/intervention,Neurovascular Interventions,Neuro venous embolization
+31961,Thrombolysis neuro artery,Neuro dx/intervention,Neurovascular Interventions,Thrombolysis neuro artery
+31962,Thrombectomy neuro artery,Neuro dx/intervention,Neurovascular Interventions,Thrombectomy neuro artery
+31963,Thrombolysis neuro venous,Neuro dx/intervention,Neurovascular Interventions,Thrombolysis neuro venous
+32023,Thrombectomy neuro venous,Neuro dx/intervention,Neurovascular Interventions,Thrombectomy neuro venous
+32944,Neuro - extracranial arterial PTA,Neuro dx/intervention,Neurovascular Interventions,Neuro arterial PTA
+32945,Neuro - intracranial arterial PTA,Neuro dx/intervention,Neurovascular Interventions,Neuro arterial PTA
+32946,Neuro - extracranial arterial stent,Neuro dx/intervention,Neurovascular Interventions,Neuro arterial stent
+32947,Neuro - intracranial arterial stent,Neuro dx/intervention,Neurovascular Interventions,Neuro arterial stent
+32948,Angio - extracranial carotid selective,Neuro dx/intervention,Neurovascular Interventions,Selective neuro angiography
+32949,Angio - intracranial carotid selective,Neuro dx/intervention,Neurovascular Interventions,Selective neuro angiography
+32943,new outpatient clinic evaluation,New Outpatient Eval,Patient Evaluation,New Outpatient Clinic Evaluation
+31670,Thrombolysis catheter check arterial,Other,Arterial Interventions,Thrombolysis catheter check arterial
+31671,Thrombolysis catheter change arterial,Other,Arterial Interventions,Thrombolysis catheter change arterial
+31685,Arterial foreign body retrieval,Other,Arterial Interventions,Arterial foreign body retrieval
+31690,Arterial line placement for monitoring,Other,Arterial Interventions,Arterial line placement for monitoring
+31724,Venous thrombolysis catheter check,Other,Venous Interventions,Venous thrombolysis catheter check
+31743,Venous foreign body repostioning venous,Other,Venous Interventions,Venous foreign body retrieval
+31744,Venous sampling - Neuro,Other,Venous Interventions,Venous sampling
+31745,Venous sampling - petrosal sinus,Other,Venous Interventions,Venous sampling
+31746,Venous sampling - renal vein,Other,Venous Interventions,Venous sampling
+31747,Venous sampling - adrenal vein,Other,Venous Interventions,Venous sampling
+31748,Venous sampling - parathyroid vein,Other,Venous Interventions,Venous sampling
+31749,Venous sampling - portal vein,Other,Venous Interventions,Venous sampling
+31750,Venous sampling - gonadal vein,Other,Venous Interventions,Venous sampling
+31751,Venouos peripheral ablation,Other,Venous Interventions,Venous sampling
+31752,Phlebectomy,Other,Venous Interventions,Venous sampling
+31753,Venous sclerotherapy,Other,Venous Interventions,Venous sampling
+31783,Venous access line check,Other,Venous Access General,Venous access line check
+31787,Venous access reposition,Other,Venous Access General,Venous access reposition
+31788,Venous access repair,Other,Venous Access General,Venous access repair
+31798,Dialysis access occlusion/reduction,Other,Dialysis Shunt Management,Dialysis access occlusion/reduction
+31799,Percutaneous AVF creation,Other,Dialysis Shunt Management,Percutaneous AVF creation
+31906,Drainage tube check,Other,Drainage Procedures,Drainage tube check
+31909,Sclerosis of fluid collection,Other,Drainage Procedures,Sclerosis
+31910,Sclerosis of cyst,Other,Body Procedures,Sclerosis
+31911,Fistula/sinus track manipulation,Other,Drainage Procedures,Fistula/sinus track manipulation
+31946,Foreign body retrieval non-vascular,Other,Lymphatic Interventions and Other,Foreign body retrieval non-vascular
+31947,Tracheal stent,Other,Lymphatic Interventions and Other,Airway stent general
+31948,Bronchial stent,Other,Lymphatic Interventions and Other,Airway stent general
+31949,Airway embolization general,Other,Lymphatic Interventions and Other,Airway stent general
+32025,Thrombectomy neuro venous,Other,Neurovascular Interventions,Thrombectomy neuro venous
+31896,Paracentesis,Paracentesis,Drainage Procedures,Paracentesis
+31793,Peritoneal dialysis catheter - placement,Peritoneal dialysis,Dialysis Shunt Management,Peritoneal dialysis catheter
+31794,Peritoneal dialysis catheter - manipulation,Peritoneal dialysis,Dialysis Shunt Management,Peritoneal dialysis catheter
+31795,Peritoneal dialysis catheter - change,Peritoneal dialysis,Dialysis Shunt Management,Peritoneal dialysis catheter
+31796,Peritoneal dialysis catheter - check/injection,Peritoneal dialysis,Dialysis Shunt Management,Peritoneal dialysis catheter
+31797,Peritoneal dialysis catheter - removal,Peritoneal dialysis,Dialysis Shunt Management,Peritoneal dialysis catheter
+31509,PET,PET,Diagnostic Radiology,PET
+31802,Pecutaneous biliary drainage external,Primary GI Intervention,Biliary Interventions,Percutaneous biliary catheter drainage
+31803,Percutaneous biliary drainage internal/external,Primary GI Intervention,Biliary Interventions,Percutaneous biliary catheter drainage
+31804,Cholecystostomy tube placement,Primary GI Intervention,Biliary Interventions,Cholecystostomy tube placement
+31814,Gastrostomy,Primary GI Intervention,GI Intervention,Percutaneous upper GI access
+31815,Gastrojejunostomy,Primary GI Intervention,GI Intervention,Percutaneous upper GI access
+31816,Primary GJ placement,Primary GI Intervention,GI Intervention,Percutaneous upper GI access
+31817,G to GJ conversion,Primary GI Intervention,GI Intervention,Percutaneous upper GI access
+31818,Jejunostomy,Primary GI Intervention,GI Intervention,Percutaneous upper GI access
+31819,"Wire placement for PEG, body",Primary GI Intervention,GI Intervention,Percutaneous upper GI access
+32942,Transesophageal Gastrostomy,Primary GI Intervention,GI Intervention,Percutaneous upper GI access
+31836,Nephrostomy tube placement,Primary Nephrostomy,GU Intervention,Nephrostomy tube placement
+31837,Nephroureteral stent antegrade placement,Primary Nephrostomy,GU Intervention,Nephroureteral stent antegrade placement
+32939,Oral I-131 LOW,Radiotherapy,Nuclear Medicine Procedures,Radiotherapy
+32940,Oral I-131 HIGH,Radiotherapy,Nuclear Medicine Procedures,Radiotherapy
+32941,Parenteral radiotracer injection/Theranostics,Radiotherapy,Nuclear Medicine Procedures,Radiotherapy
+32937,"Radiotracer injection, sentinel node",Radiotracer Injection,Nuclear Medicine Procedures,Radiotracer injection
+32938,"Radiotracer injection, VP shunt reservoir",Radiotracer Injection,Nuclear Medicine Procedures,Radiotracer injection
+31781,Tunneled catheter removal,Removal,Venous Access General,Venous access explant
+31782,Port removal,Removal,Venous Access General,Venous access explant
+31831,GI tube removal,Removal,GI Intervention,GI tube maintenance general
+31857,Nephrostomy removal,Removal,GU Intervention,GU tube/stent removal
+31858,Nephroureteral stent removal,Removal,GU Intervention,GU tube/stent removal
+31907,Drainage tube removal,Removal,Drainage Procedures,Drainage tube removal
+31950,Myelography,Spinal puncture,Lymphatic Interventions and Other,Myelography
+32934,"Cervical/thoracic puncture, CSF",Spinal puncture,Lymphatic Interventions and Other,Cervical Thoracic CSF puncture
+32935,Epidural injection/blood patch,Spinal puncture,Neuro Procedures,Epidural injection/blood patch
+32936,"Lumbar Puncture, CSF",Spinal puncture,Lymphatic Interventions and Other,Lumbar CSF puncture
+31895,Thoracentesis,Thoracentesis,Drainage Procedures,Thoracentesis
+31666,Thrombolysis - aorta,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial thrombolysis - initial
+31667,Thrombolysis - lower extremity artery,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial thrombolysis - initial
+31668,Thrombolysis - upper extremity artery (excluding neuro),Thrombolysis/Thrombectomy,Arterial Interventions,Arterial thrombolysis - initial
+31669,Thrombolysis - visceral artery,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial thrombolysis - initial
+31672,Mechanical thrombectomy - aorta,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial mechanical thrombectomy
+31673,Mechanical thrombectomy - lower extremity artery,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial mechanical thrombectomy
+31674,Mechanical thrombectomy - upper extremity artery,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial mechanical thrombectomy
+31675,Mechanical thrombectomy - neuro artery,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial mechanical thrombectomy
+31676,Mechanical thrombectomy - visceral artery,Thrombolysis/Thrombectomy,Arterial Interventions,Arterial mechanical thrombectomy
+31718,Thrombolysis catheter peripheral vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous thrombolysis - initial
+31719,Thrombolysis catheter lower extremity vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous thrombolysis - initial
+31720,Thrombolysis catheter upper extremity vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous thrombolysis - initial
+31721,Thrombolysis catheter SVC,Thrombolysis/Thrombectomy,Venous Interventions,Venous thrombolysis - initial
+31722,Thrombolysis catheter IVC,Thrombolysis/Thrombectomy,Venous Interventions,Venous thrombolysis - initial
+31723,Thrombolysis catheter visceral/renal vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous thrombolysis - initial
+31726,Mechanical thrombectomy peripheral vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous mechanical thrombectomy
+31727,Mechanical thrombectomy lower extremity vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous mechanical thrombectomy
+31728,Mechanical thrombectomy upper extremity vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous mechanical thrombectomy
+31729,Mechanical thrombectomy SVC,Thrombolysis/Thrombectomy,Venous Interventions,Venous mechanical thrombectomy
+31730,Mechanical thrombectomy IVC,Thrombolysis/Thrombectomy,Venous Interventions,Venous mechanical thrombectomy
+31731,Mechanical thrombectomy visceral/renal vein,Thrombolysis/Thrombectomy,Venous Interventions,Venous mechanical thrombectomy
+31756,Pulmonary artery thrombolysis,Thrombolysis/Thrombectomy,Pulmonary Arterial Interventions,Pulmonary artery thrombolysis
+31758,Pulmonary artery thrombectomy,Thrombolysis/Thrombectomy,Pulmonary Arterial Interventions,Pulmonary artery thrombectomy
+31769,Portal vein thrombectomy,Thrombolysis/Thrombectomy,Portal Interventions,Portal vein thrombectomy
+31770,Portal vein thrombolysis - initial,Thrombolysis/Thrombectomy,Portal Interventions,Portal vein thrombolysis - initial
+31784,Venous access thrombolysis,Thrombolysis/Thrombectomy,Venous Access General,Venous access thrombolysis
+31763,TIPS primary,TIPS or TIPS Revision,Portal Interventions,TIPS
+31764,TIPS revision PTA,TIPS or TIPS Revision,Portal Interventions,TIPS
+31765,TIPS revision thrombolysis,TIPS or TIPS Revision,Portal Interventions,TIPS
+31766,TIPS revision stent,TIPS or TIPS Revision,Portal Interventions,TIPS
+31912,Chemical ablation of tumor,Tumor Ablation,Tumor Ablation,Chemical ablation of tumor
+31913,Thermal ablation - hepatic tumor,Tumor Ablation,Body Procedures,Thermal ablation visceral organ tumor
+31914,Thermal ablation - splenic tumor,Tumor Ablation,Tumor Ablation,Thermal ablation visceral organ tumor
+31915,Thermal ablation - pancreatic tumor,Tumor Ablation,Body Procedures,Thermal ablation visceral organ tumor
+31916,Thermal ablation - renal tumor,Tumor Ablation,Tumor Ablation,Thermal ablation visceral organ tumor
+31917,Thermal ablation - peripheral extremity,Tumor Ablation,Body Procedures,Thermal ablation visceral organ tumor
+31918,Thermal ablation chest tumor,Tumor Ablation,Tumor Ablation,Thermal ablation chest tumor
+31919,Thermal ablation bone tumor,Tumor Ablation,Tumor Ablation,Thermal ablation bone tumor
+31920,Thermal ablation soft tissue tumor,Tumor Ablation,MSK Procedures,Thermal ablation soft tissue tumor
+31921,Thermal ablation vertebral tumor,Tumor Ablation,Tumor Ablation,Thermal ablation vertebral tumor
+31922,Other tumor ablation,Tumor Ablation,Tumor Ablation,Other tumor ablation
+31505,US Abd/Pel,US abd/pel,Diagnostic Radiology,US Abd/Pel
+31775,Venous access central insert,US guided venous access,Venous Access General,Venous access placement - nontunneled
+31776,Venous access peripheral insert (PICC),US guided venous access,Venous Access General,Venous access placement - nontunneled
+31777,Swan Ganz catheter,US guided venous access,Venous Access General,Venous access placement - nontunneled
+31778,Venous access other (midline catheter),US guided venous access,Venous Access General,Venous access placement - nontunneled
+31779,Venous access tunneled placement,US guided venous access,Venous Access General,Venous access tunneled placement
+31785,Venous access stripping,US guided venous access,Venous Access General,Venous access stripping
+31651,Intravascular ultrasound arterial,US Hands On Scans,Diagnostic Arteriography,Intravascular ultrasound arterial
+31706,Intravascular ultrasound venous,US Hands On Scans,Diagnostic Venography,Intravascular ultrasound venous
+32920,US Hands On Scans 75 required (body),US Hands On Scans,Body Procedures,Ultrasound Imaging
+32922,US Hands On Scans 75 required (breast),US Hands On Scans,Breast Procedures,Ultrasound Imaging
+32928,US Hands On Scans 75 required (MSK),US Hands On Scans,MSK Procedures,Ultrasound Imaging
+31696,Peripheral extremity - venography,Venogram,Diagnostic Venography,Peripheral extremity venography
+31697,Venography - SVC,Venogram,Diagnostic Venography,Central venography
+31698,Venography - IVC,Venogram,Diagnostic Venography,Central venography
+31699,Venography - adrenal vein,Venogram,Diagnostic Venography,Visceral venography
+31700,Venography - gonadal vein,Venogram,Diagnostic Venography,Visceral venography
+31701,Venography - hepatic vein,Venogram,Diagnostic Venography,Visceral venography
+31702,Venography - hepatic vein w/wedge pressures,Venogram,Diagnostic Venography,Visceral venography
+31703,Venography - parathyroid vein,Venogram,Diagnostic Venography,Visceral venography
+31704,Venography - renal vein,Venogram,Diagnostic Venography,Visceral venography
+31705,Venography - centra/visceral other vein,Venogram,Diagnostic Venography,Visceral venography
+31762,Diagnostic portal venogram,Venogram,Portal Interventions,Diagnostic portal venogram
+31771,Portal vein thrombolysis catheter check,Venogram,Portal Interventions,Portal vein thrombolysis catheter check
+31707,PTA lower extremity vein,Venous Intervention,Venous Interventions,Venous PTA
+31708,PTA upper extremity vein,Venous Intervention,Venous Interventions,Venous PTA
+31709,PTA venous central,Venous Intervention,Venous Interventions,Venous PTA
+31710,PTA IVC,Venous Intervention,Venous Interventions,Venous PTA
+31711,PTA SVC,Venous Intervention,Venous Interventions,Venous PTA
+31712,PTA visceral/renal vein,Venous Intervention,Venous Interventions,Venous PTA
+31713,Stent lower extremity vein,Venous Intervention,Venous Interventions,Venous stent
+31714,Stent brachiocephalic/subclavian vein,Venous Intervention,Venous Interventions,Venous stent
+31715,Stent SVC,Venous Intervention,Venous Interventions,Venous stent
+31716,Stent IVC,Venous Intervention,Venous Interventions,Venous stent
+31717,Stent visceral/renal vein,Venous Intervention,Venous Interventions,Venous stent
+31740,IVC filter placement,Venous Intervention,Venous Interventions,IVC filter placement
+31741,Venous foreign body retrieval,Venous Intervention,Venous Interventions,Venous foreign body retrieval
+31742,IVC filter retrieval,Venous Intervention,Venous Interventions,Venous foreign body retrieval
+31767,Portal vein PTA,Venous Intervention,Portal Interventions,Portal vein PTA
+31768,Portal vein stent,Venous Intervention,Portal Interventions,Portal vein stent
+31780,Venous port placement,Venous Port,Venous Access General,Venous port placement
+31932,Vertebral augmentation - lumbar,Vertebral Augmentation,Musculoskeletal Interventions/Pain Management,Vertebral augmentation
+31933,Vertebral augmentation - thoracic,Vertebral Augmentation,MSK Procedures,Vertebral augmentation
+31934,Vertebral augmentation - cervical,Vertebral Augmentation,Musculoskeletal Interventions/Pain Management,Vertebral augmentation
+31935,Sacral augmentation,Vertebral Augmentation,MSK Procedures,Vertebral augmentation

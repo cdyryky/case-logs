@@ -4,6 +4,7 @@ import json
 import sqlite3
 from typing import Any
 
+from .candidates import load_acgme_targets
 from .config_io import load_resident_profile
 from .constants import DEFAULT_CASE_CLASS, ROOT
 from .models import log_event, row_to_dict, utc_now
@@ -24,6 +25,7 @@ def payload_from_entry(row: sqlite3.Row) -> dict[str, Any]:
         "site": row["site"],
         "patient_type": row["patient_type"],
         "case_class": row["case_class"],
+        "acgme_code": row["acgme_code"] or "" if "acgme_code" in row.keys() else "",
         "area": row["area"],
         "type": row["type"],
         "acgme_description": row["acgme_description"] or "",
@@ -313,6 +315,7 @@ def _manual_dedupe_key(source: sqlite3.Row, case_date: str, code: dict[str, Any]
             source["accession_number"],
             case_date,
             str(code.get("case_class") or DEFAULT_CASE_CLASS),
+            str(code.get("acgme_code") or ""),
             str(code["area"]),
             str(code["type"]),
             str(code.get("acgme_description") or ""),
@@ -358,6 +361,7 @@ def save_group_edit(conn: sqlite3.Connection, source_case_id: int, codes: list[d
         component_label = str(code.get("component_label") or f"manual_{index}")
         values = (
             str(code.get("case_class") or DEFAULT_CASE_CLASS),
+            str(code.get("acgme_code") or ""),
             str(code["area"]),
             str(code["type"]),
             str(code.get("acgme_description") or ""),
@@ -372,7 +376,7 @@ def save_group_edit(conn: sqlite3.Connection, source_case_id: int, codes: list[d
             conn.execute(
                 """
                 UPDATE generated_entries
-                SET case_class = ?, area = ?, type = ?, acgme_description = ?, acgme_def_category = ?,
+            SET case_class = ?, acgme_code = ?, area = ?, type = ?, acgme_description = ?, acgme_def_category = ?,
                     keyword = ?, comments = ?, component_label = ?, review_status = 'edited',
                     upload_status = CASE
                       WHEN upload_status IN ('claimed', 'autofilled') THEN upload_status
@@ -393,11 +397,11 @@ def save_group_edit(conn: sqlite3.Connection, source_case_id: int, codes: list[d
             """
             INSERT OR IGNORE INTO generated_entries(
               source_case_id, dedupe_key, component_label, case_id, case_date, case_year, role, site,
-              patient_type, case_class, area, type, acgme_description, acgme_def_category, keyword, comments,
+              patient_type, case_class, acgme_code, area, type, acgme_description, acgme_def_category, keyword, comments,
               mapping_rule_id, mapping_rule_version, mapping_rules_file_hash, mapping_rule_name,
               mapping_confidence, role_confidence, compound_flag, review_status, upload_status, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', '1', 'manual',
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', '1', 'manual',
                     'Popup edit', 'low', ?, 1, 'edited', 'claimed', ?, ?)
             """,
             (
@@ -415,6 +419,7 @@ def save_group_edit(conn: sqlite3.Connection, source_case_id: int, codes: list[d
                 base["site"],
                 base["patient_type"],
                 str(code.get("case_class") or DEFAULT_CASE_CLASS),
+                str(code.get("acgme_code") or ""),
                 str(code["area"]),
                 str(code["type"]),
                 str(code.get("acgme_description") or ""),
@@ -453,32 +458,29 @@ def save_group_edit(conn: sqlite3.Connection, source_case_id: int, codes: list[d
 
 
 def parse_acgme_options() -> list[dict[str, str]]:
-    path = ROOT / "ACGME-class:area:type dictionary.txt"
-    data = json.loads(path.read_text())
-    options: dict[tuple[str, str, str, str], dict[str, str]] = {}
-    for groups in data.values():
-        for _group_name, entries in groups.items():
-            if not isinstance(entries, list):
-                continue
-            for item in entries:
-                area = " ".join(str(item.get("area") or "").replace("\u00a0", " ").split())
-                typ = " ".join(str(item.get("type") or "").replace("\u00a0", " ").split())
-                raw_description = " ".join(str(item.get("description") or "").replace("\u00a0", " ").split())
-                description, _, def_cat = raw_description.partition("Def Cat:")
-                description = description.strip()
-                def_cat = def_cat.strip()
-                if not area or not typ:
-                    continue
-                key = (DEFAULT_CASE_CLASS, area, typ, description)
-                options[key] = {
-                    "case_class": DEFAULT_CASE_CLASS,
-                    "area": area,
-                    "type": typ,
-                    "acgme_description": description,
-                    "acgme_def_category": def_cat,
-                    "label": " / ".join(part for part in [area, typ, description] if part),
-                }
-    return sorted(options.values(), key=lambda item: (item["area"], item["type"], item["acgme_description"]))
+    options: list[dict[str, str]] = []
+    for target in load_acgme_targets():
+        options.append(
+            {
+                "case_class": DEFAULT_CASE_CLASS,
+                "acgme_code": target.acgme_code,
+                "area": target.area,
+                "type": target.type,
+                "acgme_description": target.acgme_description,
+                "acgme_def_category": target.acgme_def_category,
+                "label": " | ".join(
+                    part
+                    for part in [
+                        target.acgme_code,
+                        target.acgme_description or target.type,
+                        f"{target.area} / {target.type}",
+                        f"Def Cat: {target.acgme_def_category}" if target.acgme_def_category else "",
+                    ]
+                    if part
+                ),
+            }
+        )
+    return sorted(options, key=lambda item: (item["area"], item["type"], item["acgme_description"], item["acgme_code"]))
 
 
 def search_acgme_options(query: str = "", limit: int = 80) -> list[dict[str, str]]:
