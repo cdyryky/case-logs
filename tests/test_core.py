@@ -10,6 +10,7 @@ from datetime import datetime
 
 from app.candidates import (
     add_manual_candidate,
+    add_manual_candidates,
     approve_candidate_review,
     build_match_candidates,
     load_acgme_targets,
@@ -401,7 +402,7 @@ class CoreTests(unittest.TestCase):
         source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
         results = search_acgme_targets("paracentesis")
         self.assertTrue(results)
-        candidate_id = add_manual_candidate(conn, source_id, results[0])
+        candidate_id = next(iter(add_manual_candidates(conn, source_id, [results[0]])))
         row = conn.execute("SELECT * FROM source_match_candidates WHERE id = ?", (candidate_id,)).fetchone()
         self.assertEqual(row["source_kind"], "manual_search")
         self.assertEqual(row["default_checked"], 1)
@@ -461,6 +462,132 @@ class CoreTests(unittest.TestCase):
                 for candidate in checked
             )
         )
+
+    def test_candidate_generation_selects_biliary_stent_without_generic_overmatch(self) -> None:
+        raw = {
+            "Accession Number": "202605060600",
+            "Modality": "IR",
+            "Exam Code": "IRBILDRCH",
+            "Exam Description": "IR BILIARY DRAIN CHECK/CHANGE",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Transhepatic cholangiogram and biliary stent placement\n\n"
+                "Procedural Personnel\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "1. Balloon sweep of the indwelling metal CBD stent.\n"
+                "2. Conversion of the right posterior and left internal-external biliary to internal plastic stents.\n\n"
+                "PROCEDURE SUMMARY\n"
+                "- Percutaneous transhepatic cholangiogram through existing access\n"
+                "- Biliary stent placement as described below\n"
+                "- Biliary drain placement: Not performed\n"
+                "- Additional procedure(s): Cholangioplasty\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked = [candidate for candidate in build_match_candidates(source) if candidate["default_checked"] == 1]
+        checked_codes = {candidate["acgme_code"] for candidate in checked}
+        self.assertEqual(checked_codes, {"31810"})
+        self.assertNotIn("31665", checked_codes)
+        self.assertNotIn("31812", checked_codes)
+
+    def test_negative_biliary_drain_placement_does_not_create_checked_drain_candidate(self) -> None:
+        raw = {
+            "Accession Number": "202605060601",
+            "Modality": "IR",
+            "Exam Code": "IRBILDRCH",
+            "Exam Description": "IR BILIARY DRAIN CHECK/CHANGE",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Biliary stent placement\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful biliary stent placement.\n\n"
+                "PROCEDURE SUMMARY\n"
+                "- Biliary drain placement: Not performed\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked = [candidate for candidate in build_match_candidates(source) if candidate["default_checked"] == 1]
+        self.assertFalse(any(candidate["type"] == "Drainage tube placement" for candidate in checked))
+
+    def test_us_guided_biopsy_requires_site_before_selecting_adrenal(self) -> None:
+        raw = {
+            "Accession Number": "202605060700",
+            "Modality": "US",
+            "Exam Code": "USSPRFCLBXASPR",
+            "Exam Description": "US GUIDED SUPERFICIAL BIOPSY/ASPIRATION",
+            "CPT Code": "",
+            "Report Text": (
+                "US GUIDED SUPERFICIAL BIOPSY/ASPIRATION\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful ultrasound-guided biopsy of a superficial soft tissue lesion.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked = [candidate for candidate in build_match_candidates(source) if candidate["default_checked"] == 1]
+        self.assertFalse(any(candidate["acgme_code"] == "31871" for candidate in checked))
+        self.assertTrue(any(candidate["acgme_code"] == "31873" for candidate in checked))
+
+    def test_hepatic_radioembolization_selects_radioembolization_not_uterine(self) -> None:
+        raw = {
+            "Accession Number": "202605060800",
+            "Modality": "IR",
+            "Exam Code": "IRRADIOEMB",
+            "Exam Description": "Hepatic radioembolization - Radioisotope administration",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Hepatic radioembolization - Radioisotope administration\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful Y90 radioembolization of hepatic tumor.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked_codes = {candidate["acgme_code"] for candidate in build_match_candidates(source) if candidate["default_checked"] == 1}
+        self.assertIn("31680", checked_codes)
+        self.assertNotIn("31681", checked_codes)
+
+    def test_transvaginal_pelvic_drainage_creates_one_checked_drainage_candidate(self) -> None:
+        raw = {
+            "Accession Number": "202605060900",
+            "Modality": "US",
+            "Exam Code": "USGUIDEDRAIN",
+            "Exam Description": "Transvaginal pelvic drainage catheter placement with ultrasound guidance",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Transvaginal pelvic drainage catheter placement with ultrasound guidance\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful transvaginal pelvic drainage catheter placement.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked = [candidate for candidate in build_match_candidates(source) if candidate["default_checked"] == 1]
+        drainage = [candidate for candidate in checked if candidate["type"] == "Drainage tube placement"]
+        self.assertEqual(len(drainage), 1)
+        self.assertEqual(drainage[0]["acgme_code"], "31902")
 
     def test_approve_checked_candidates_creates_entries_and_rejects_unchecked(self) -> None:
         conn = sqlite3.connect(":memory:")

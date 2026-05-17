@@ -15,7 +15,7 @@ from .matching import match_tokens, normalize_match_text
 from .models import log_event, utc_now
 from .utils import canonical_key
 
-ALGORITHM_VERSION = "candidate_v3_acgme_csv"
+ALGORITHM_VERSION = "candidate_v4_conservative_events"
 ACGME_TARGETS_PATH = CONFIG_DIR / "acgme_targets.csv"
 
 
@@ -289,7 +289,11 @@ def apply_learning_signals(
         if boost:
             item["score"] = round(max(0.0, min(1.0, float(item["score"]) + boost)), 4)
             item["confidence"] = confidence_for_score(float(item["score"]))
-            item["default_checked"] = int(item["confidence"] in {"high", "medium"})
+            item["default_checked"] = int(
+                bool(item.get("default_checked"))
+                and item.get("source_kind") in {"event_alias", "rule"}
+                and item["confidence"] == "high"
+            )
             item["match_reason"] = f"{item['match_reason']} Learning signal adjusted score."
         adjusted.append(item)
     return sorted(adjusted, key=lambda row: row["score"], reverse=True)
@@ -340,6 +344,65 @@ def _has_domain_support(target: CandidateTarget, source_text: str) -> bool:
 def _is_generic_device_match(shared: set[str]) -> bool:
     generic = {"catheter", "tube", "drain", "exchange", "exchanged", "change", "changed", "stent", "check", "checked"}
     return bool(shared) and shared <= generic
+
+
+def _has_negative_evidence(value: str) -> bool:
+    text = normalize_match_text(value)
+    return bool(
+        re.search(
+            r"\b(?:not performed|not attempted|no intervention|procedure was not performed|deferred|aborted|unsuccessful|without placement)\b",
+            text,
+        )
+    )
+
+
+def _positive_phrases(phrases: list[str]) -> list[str]:
+    return [phrase for phrase in phrases if not _has_negative_evidence(phrase)]
+
+
+def _positive_source_text(source: dict[str, Any] | sqlite3.Row, phrases: list[str]) -> str:
+    return _source_domain_text(source, _positive_phrases(phrases))
+
+
+def _target_requires_specific_evidence(target: CandidateTarget, source_text: str) -> bool:
+    desc = canonical_key(target.acgme_description)
+    typ = canonical_key(target.type)
+    area = canonical_key(target.area)
+
+    organ_terms = {
+        "biopsy_adrenal": r"\badrenal\b",
+        "biopsy_biliary": r"\b(?:biliary|bile duct|gallbladder)\b",
+        "biopsy_spleen": r"\b(?:spleen|splenic)\b",
+        "biopsy_genitourinary": r"\b(?:renal|kidney|nephro|ureter|bladder|prostate|testicular|genitourinary|gu)\b",
+        "biopsy_lung": r"\b(?:lung|pulmonary)\b",
+        "biopsy_mediastinum": r"\bmediastin",
+        "biopsy_soft_tissue": r"\b(?:soft tissue|subcutaneous|superficial|muscle|fat pad)\b",
+        "biopsy_joint": r"\bjoint\b",
+        "biopsy_bone_marrow": r"\b(?:bone marrow|marrow)\b",
+        "biopsy_cervical_nodal": r"\b(?:cervical|neck).*\b(?:node|nodal|lymph)\b|\b(?:node|nodal|lymph).*\b(?:cervical|neck)\b",
+        "biopsy_thyroid": r"\bthyroid\b",
+        "biopsy_lymph_node": r"\b(?:lymph node|nodal|node biopsy)\b",
+    }
+    if desc in organ_terms:
+        return bool(re.search(organ_terms[desc], source_text))
+
+    if desc == "uterine_artery_embolization":
+        return bool(re.search(r"\b(?:uterine|uterus|fibroid|uae)\b", source_text))
+    if desc == "embolization_of_tumor_radioembolization":
+        return bool(re.search(r"\b(?:radioembolization|y-?90|yttrium|radioisotope|therasphere|sir-?spheres)\b", source_text))
+    if desc == "stent_visceral_artery":
+        return bool(re.search(r"\b(?:arterial|artery|visceral|celiac|mesenteric|hepatic artery|splenic artery)\b", source_text))
+    if area == "biliary_interventions" and typ == "biliary_tube_maintenance":
+        return bool(re.search(r"\bbiliary\b.*\b(?:drain|tube|catheter)\b.*\b(?:exchange|exchanged|internaliz)", source_text))
+    return True
+
+
+def _rule_can_default_check(target: CandidateTarget, source_text: str, shared_tokens: set[str]) -> bool:
+    if not _has_domain_support(target, source_text):
+        return False
+    if _is_generic_device_match(shared_tokens):
+        return False
+    return _target_requires_specific_evidence(target, source_text)
 
 
 def _find_target(
@@ -433,7 +496,7 @@ def _resolve_rule_target(rule: MappingRule, targets: list[CandidateTarget]) -> C
 def _combine_event_phrases(phrases: list[str], pattern: str) -> tuple[str, ...]:
     matched = [
         phrase
-        for phrase in phrases
+        for phrase in _positive_phrases(phrases)
         if re.search(pattern, normalize_match_text(phrase), re.I)
     ]
     return tuple(dict.fromkeys(matched))
@@ -441,7 +504,168 @@ def _combine_event_phrases(phrases: list[str], pattern: str) -> tuple[str, ...]:
 
 def procedure_events(source: dict[str, Any] | sqlite3.Row, phrases: list[str]) -> list[ProcedureEvent]:
     events: list[ProcedureEvent] = []
-    source_text = _source_domain_text(source, phrases)
+    source_text = _positive_source_text(source, phrases)
+
+    biliary_stent_pattern = (
+        r"\bbiliary\b.*\bstent\b.*\b(?:placement|placed|conversion|internal|plastic|metal)\b|"
+        r"\bconversion\b.*\bbiliary\b.*\bstent\b|"
+        r"\binternal plastic stents?\b|"
+        r"\bmetal cbd stent\b"
+    )
+    biliary_stent_phrases = _combine_event_phrases(phrases, biliary_stent_pattern)
+    if biliary_stent_phrases:
+        events.append(
+            ProcedureEvent(
+                key="biliary_stent_placement",
+                label="Biliary stent placement",
+                phrases=biliary_stent_phrases,
+                target_area="Biliary Interventions",
+                target_type="Biliary stent placement",
+                target_description="Biliary stent placement (metal or plastic)",
+                target_def_category="GI/biliary Intervention; Other",
+                reason="Explicit event: biliary stent placement/conversion.",
+                score=0.97,
+            )
+        )
+
+    biliary_exchange_pattern = (
+        r"\bbiliary\b.*\b(?:drain|tube|catheter)\b.*\b(?:exchange|exchanged|internalization|internalized)\b|"
+        r"\b(?:exchange|exchanged|internalization|internalized)\b.*\bbiliary\b.*\b(?:drain|tube|catheter)\b"
+    )
+    biliary_exchange_phrases = _combine_event_phrases(phrases, biliary_exchange_pattern)
+    if biliary_exchange_phrases:
+        target_description = (
+            "Biliary tube exchange w/internalization"
+            if re.search(r"\binternaliz", " ".join(normalize_match_text(p) for p in biliary_exchange_phrases))
+            else "Biliary tube exchange"
+        )
+        target_def = "GI/biliary Intervention; Other" if "internalization" in target_description.lower() else "Catheter exchange; Other"
+        events.append(
+            ProcedureEvent(
+                key="biliary_tube_exchange",
+                label="Biliary tube exchange/internalization",
+                phrases=biliary_exchange_phrases,
+                target_area="Biliary Interventions",
+                target_type="Biliary tube maintenance",
+                target_description=target_description,
+                target_def_category=target_def,
+                reason="Explicit event: biliary drain/tube exchange or internalization.",
+                score=0.95,
+            )
+        )
+
+    radioembolization_pattern = r"\b(?:hepatic\s+)?radioembolization\b|\by-?90\b|\byttrium\b|\bradioisotope administration\b|\btherasphere\b|\bsir-?spheres\b"
+    radioembolization_phrases = _combine_event_phrases(phrases, radioembolization_pattern)
+    if radioembolization_phrases:
+        events.append(
+            ProcedureEvent(
+                key="tumor_radioembolization",
+                label="Tumor radioembolization",
+                phrases=radioembolization_phrases,
+                target_area="Arterial Interventions",
+                target_type="Arterial embolization",
+                target_description="Embolization of tumor - radioembolization",
+                target_def_category="Embolization",
+                reason="Explicit event: radioembolization/Y90.",
+                score=0.98,
+            )
+        )
+
+    embolization_phrases = _combine_event_phrases(phrases, r"\b(?:embolization|embolized|embolize|transarterial embolization)\b")
+    if embolization_phrases and not radioembolization_phrases:
+        if re.search(r"\b(?:uterine|uterus|fibroid|uae)\b", source_text):
+            target_description = "Uterine artery embolization"
+            reason = "Explicit event: uterine artery embolization."
+        else:
+            target_description = "Other arterial embolization"
+            reason = "Explicit event: arterial embolization."
+        events.append(
+            ProcedureEvent(
+                key=canonical_key(target_description),
+                label=target_description,
+                phrases=embolization_phrases,
+                target_area="Arterial Interventions",
+                target_type="Arterial embolization",
+                target_description=target_description,
+                target_def_category="Embolization",
+                reason=reason,
+                score=0.92,
+            )
+        )
+
+    drain_placement_pattern = (
+        r"\b(?:transvaginal|pelvic|abscess|fluid collection|peritoneal|retroperitoneal|visceral|organ|superficial|extremity|pleural|chest)\b"
+        r".*\b(?:drainage catheter|drain|tube)\b.*\b(?:placement|placed|insertion|inserted)\b|"
+        r"\b(?:drainage catheter|drain|tube)\b.*\b(?:placement|placed|insertion|inserted)\b"
+    )
+    drain_phrases = _combine_event_phrases(phrases, drain_placement_pattern)
+    if drain_phrases and re.search(r"\b(?:drainage|drain|abscess|fluid collection)\b", source_text):
+        if re.search(r"\b(?:pelvic|transvaginal|intraperitoneal|peritoneal)\b", source_text):
+            target_description = "Drainage - intraperitoneal tube"
+            target_area = "Drainage Procedures"
+            target_def = "Drain Placement; Image guided bx/drainage"
+        elif re.search(r"\b(?:retroperitoneal)\b", source_text):
+            target_description = "Drainage - retroperitoneal tube"
+            target_area = "Body Procedures"
+            target_def = "Drain Placement; Image guided bx/drainage"
+        elif re.search(r"\b(?:chest|pleural)\b", source_text):
+            target_description = "Drainage - chest tube"
+            target_area = "Drainage Procedures"
+            target_def = "Drain Placement; Image guided bx/drainage"
+        elif re.search(r"\b(?:superficial|extremity)\b", source_text):
+            target_description = "Drainage - superficial/extremity tube"
+            target_area = "Body Procedures"
+            target_def = "Drain Placement; Image guided bx/drainage"
+        else:
+            target_description = "Drainage - visceral/organ tube"
+            target_area = "Drainage Procedures"
+            target_def = "Drain Placement; Image guided bx/drainage"
+        events.append(
+            ProcedureEvent(
+                key="drainage_catheter_placement",
+                label="Drainage catheter placement",
+                phrases=drain_phrases,
+                target_area=target_area,
+                target_type="Drainage tube placement",
+                target_description=target_description,
+                target_def_category=target_def,
+                reason="Explicit event: drainage catheter placement.",
+                score=0.94,
+            )
+        )
+
+    biopsy_phrases = _combine_event_phrases(phrases, r"\b(?:biopsy|core needle|fine needle|fna)\b")
+    if biopsy_phrases:
+        biopsy_sites = [
+            (r"\badrenal\b", "Biopsy", "Biopsy abdominal/retroperitoneal", "Biopsy - adrenal"),
+            (r"\b(?:lymph node|nodal|node biopsy)\b", "Biopsy", "Biopsy lymph node", "Biopsy - lymph node"),
+            (r"\b(?:cervical|neck).*\b(?:node|nodal|lymph)\b|\b(?:node|nodal|lymph).*\b(?:cervical|neck)\b", "Biopsy", "Biopsy cervical nodal", "Biopsy - cervical nodal"),
+            (r"\bthyroid\b", "Biopsy", "Biopsy thyroid", "Biopsy - thyroid"),
+            (r"\b(?:lung|pulmonary)\b", "Biopsy", "Biopsy thoracic", "Biopsy - lung"),
+            (r"\bmediastin", "Biopsy", "Biopsy thoracic", "Biopsy - mediastinum"),
+            (r"\b(?:soft tissue|subcutaneous|superficial|muscle|fat pad)\b", "Biopsy", "Biopsy soft tissue", "Biopsy - soft tissue"),
+            (r"\b(?:bone marrow|marrow)\b", "Biopsy", "Biopsy musculoskeletal", "Biopsy - bone marrow"),
+            (r"\bjoint\b", "Biopsy", "Biopsy musculoskeletal", "Biopsy - joint"),
+            (r"\b(?:spleen|splenic)\b", "Biopsy", "Biopsy abdominal/retroperitoneal", "Biopsy - spleen"),
+            (r"\b(?:renal|kidney|nephro|ureter|bladder|prostate|testicular|genitourinary|gu)\b", "Biopsy", "Biopsy abdominal/retroperitoneal", "Biopsy - genitourinary"),
+            (r"\b(?:biliary|bile duct|gallbladder)\b", "Biopsy", "Biopsy abdominal/retroperitoneal", "Biopsy - biliary"),
+        ]
+        for pattern, area, typ, description in biopsy_sites:
+            if re.search(pattern, source_text):
+                events.append(
+                    ProcedureEvent(
+                        key=f"biopsy_{canonical_key(description)}",
+                        label=description,
+                        phrases=biopsy_phrases,
+                        target_area=area,
+                        target_type=typ,
+                        target_description=description,
+                        target_def_category="Biopsy; Image guided bx/drainage",
+                        reason=f"Explicit event: {description.lower()} with site evidence.",
+                        score=0.92,
+                    )
+                )
+                break
 
     nephroureteral_pattern = (
         r"\bnephroureteral\b.*\b(?:stent|tube)\b.*\b(?:exchange|change|upsize|upsizing|exchanged|changed)\b|"
@@ -522,7 +746,7 @@ def candidate_from_event(event: ProcedureEvent, targets: list[CandidateTarget]) 
         "component_label": event.key,
         "score": round(event.score, 4),
         "confidence": confidence,
-        "default_checked": int(confidence in {"high", "medium"}),
+        "default_checked": int(confidence == "high"),
         "match_reason": event.reason,
         "matched_phrases": matched,
         "evidence_snippet": " | ".join(matched[:3]),
@@ -564,8 +788,9 @@ def build_match_candidates(
 ) -> list[dict[str, Any]]:
     rules, cached_rule_targets = cached_rules_and_targets()
     phrases = evidence_phrases(source)
-    source_domain_text = _source_domain_text(source, phrases)
-    phrase_features = prepared_phrases(phrases)
+    positive_phrases = _positive_phrases(phrases)
+    positive_domain_text = _positive_source_text(source, phrases)
+    phrase_features = prepared_phrases(positive_phrases)
     source_token_union: set[str] = set()
     for _, tokens, _ in phrase_features:
         source_token_union.update(tokens)
@@ -591,7 +816,7 @@ def build_match_candidates(
         exact_rule = target.source_kind == "rule" and target.rule_id in exact_rule_ids
         if not exact_rule and not (source_token_union & set(cached_target_tokens(target))):
             continue
-        if not exact_rule and not _has_domain_support(target, source_domain_text):
+        if not _has_domain_support(target, positive_domain_text):
             continue
         score, matched, reason = score_target(target, phrase_features, exact_rule)
         if score < 0.38:
@@ -599,8 +824,15 @@ def build_match_candidates(
         shared_tokens = match_tokens(" ".join(matched)) & set(cached_target_tokens(target))
         if not exact_rule and _is_generic_device_match(shared_tokens):
             continue
+        if not _target_requires_specific_evidence(target, positive_domain_text):
+            continue
         key = target_key(target)
         confidence = confidence_for_score(score)
+        can_default_check = (
+            exact_rule
+            and confidence == "high"
+            and _rule_can_default_check(target, positive_domain_text, shared_tokens)
+        )
         candidate = {
             "case_class": target.case_class,
             "acgme_code": target.acgme_code,
@@ -612,7 +844,7 @@ def build_match_candidates(
             "component_label": target.component_label,
             "score": round(score, 4),
             "confidence": confidence,
-            "default_checked": int(confidence in {"high", "medium"}),
+            "default_checked": int(can_default_check),
             "match_reason": reason if not exact_rule else f"Rule match: {target.rule_name or target.type}. {reason}",
             "matched_phrases": matched,
             "evidence_snippet": " | ".join(matched[:3]),
@@ -783,6 +1015,10 @@ def add_manual_candidate(conn: sqlite3.Connection, source_case_id: int, target: 
         (candidate_key(source_case_id, candidate),),
     ).fetchone()
     return int(row["id"])
+
+
+def add_manual_candidates(conn: sqlite3.Connection, source_case_id: int, targets: list[dict[str, Any]]) -> set[int]:
+    return {add_manual_candidate(conn, source_case_id, target) for target in targets}
 
 
 def candidate_to_entry(source: sqlite3.Row, candidate: sqlite3.Row, mapping_rules_file_hash: str = "candidate_v1") -> dict[str, Any]:

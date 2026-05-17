@@ -11,7 +11,7 @@ import streamlit as st
 from app.config_io import load_dropdowns
 from app.config_io import load_resident_profile
 from app.constants import DEFAULT_CASE_CLASS, DEFAULT_DB_PATH, DEFAULT_SITE
-from app.candidates import add_manual_candidate, approve_candidate_review, search_acgme_targets
+from app.candidates import add_manual_candidates, approve_candidate_review, search_acgme_targets
 from app.export_payload import export_approved_json
 from app.importer import import_mpower_csv, import_xlsx
 from app.learning import append_learned_rule, apply_mapping_to_matching_unsubmitted, learned_rule_count
@@ -356,31 +356,48 @@ def source_context(source: sqlite3.Row) -> None:
     )
     if source["needs_review_reason"]:
         st.warning(source["needs_review_reason"])
-    if parsed:
-        st.markdown("**Parsed Report**")
-        if parsed.get("procedure_title"):
-            st.write(f"Procedure title: {parsed['procedure_title']}")
-        if parsed.get("impression"):
-            st.caption("Impression")
-            st.text(parsed["impression"])
-        summaries = parsed.get("procedure_summary_sections") or []
-        if summaries:
-            st.caption("Procedure summary")
-            for section in summaries:
-                heading = section.get("heading") or "PROCEDURE SUMMARY"
-                lines = section.get("bullets") or section.get("lines") or []
-                visible = [line for line in lines if str(line).strip()]
-                if visible:
-                    st.write(f"{heading}:")
-                    st.markdown("\n".join(f"- {line}" for line in visible))
-                additional = [line for line in section.get("additional_procedures") or [] if str(line).strip()]
-                if additional:
-                    st.write("Additional procedures:")
-                    st.markdown("\n".join(f"- {line}" for line in additional))
-        candidates = parsed.get("candidate_procedure_phrases") or []
-        if candidates:
-            with st.expander("Candidate procedure phrases"):
-                st.markdown("\n".join(f"- {phrase}" for phrase in candidates[:40]))
+    st.markdown("**Report context**")
+    warnings = parsed.get("parse_warnings") or [] if parsed else ["parsed_report_missing"]
+    status = "Parsed report available" if parsed else "Parsed report missing"
+    if warnings:
+        status = f"{status}; warnings: {', '.join(str(item) for item in warnings)}"
+    st.caption(status)
+    if parsed.get("procedure_title"):
+        st.write(f"Procedure title: {parsed['procedure_title']}")
+    else:
+        st.caption("No parsed procedure title.")
+    if parsed.get("impression"):
+        st.caption("Impression")
+        st.text(parsed["impression"])
+    else:
+        st.caption("No parsed impression.")
+    summaries = parsed.get("procedure_summary_sections") or []
+    if summaries:
+        st.caption("Procedure summary")
+        for section in summaries:
+            heading = section.get("heading") or "PROCEDURE SUMMARY"
+            lines = section.get("bullets") or section.get("lines") or []
+            visible = [line for line in lines if str(line).strip()]
+            if visible:
+                st.write(f"{heading}:")
+                st.markdown("\n".join(f"- {line}" for line in visible))
+            additional = [line for line in section.get("additional_procedures") or [] if str(line).strip()]
+            if additional:
+                st.write("Additional procedures:")
+                st.markdown("\n".join(f"- {line}" for line in additional))
+    else:
+        st.caption("No parsed procedure summary.")
+    candidates = parsed.get("candidate_procedure_phrases") or []
+    if candidates:
+        st.caption("Candidate procedure phrases")
+        st.markdown("\n".join(f"- {phrase}" for phrase in candidates[:20]))
+    else:
+        st.caption("No candidate procedure phrases.")
+    needs_raw = not parsed or not parsed.get("impression") or not summaries
+    raw_text = source["report_snippet"] if "report_snippet" in source.keys() else ""
+    if raw_text:
+        with st.expander("Raw report text", expanded=needs_raw):
+            st.text(raw_text)
 
 
 def candidate_label(candidate: sqlite3.Row) -> str:
@@ -394,6 +411,20 @@ def candidate_metadata(candidate: sqlite3.Row) -> str:
     parts.append(f"{candidate['area']} / {candidate['type']}")
     if candidate["acgme_def_category"]:
         parts.append(f"Def Cat: {candidate['acgme_def_category']}")
+    return " | ".join(parts)
+
+
+def target_primary_label(target: dict[str, object]) -> str:
+    return str(target.get("acgme_description") or target.get("type") or "ACGME target")
+
+
+def target_metadata(target: dict[str, object]) -> str:
+    parts = []
+    if target.get("acgme_code"):
+        parts.append(str(target["acgme_code"]))
+    parts.append(f"{target['area']} / {target['type']}")
+    if target.get("acgme_def_category"):
+        parts.append(f"Def Cat: {target['acgme_def_category']}")
     return " | ".join(parts)
 
 
@@ -455,30 +486,22 @@ def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candida
     if results:
         for idx, target in enumerate(results[:10]):
             checked = st.checkbox(
-                target["label"],
+                target_primary_label(target),
                 value=False,
                 key=f"acgme_search_result_{source['id']}_{idx}_{target.get('acgme_code', '')}_{target['area']}_{target['type']}_{target.get('acgme_description', '')}",
             )
+            st.caption(target_metadata(target))
             if checked:
                 checked_results.append(target)
-        if checked_results and st.button("Add checked search results", key=f"add_candidate_{source['id']}"):
-            for target in checked_results:
-                add_manual_candidate(conn, int(source["id"]), target)
-            conn.commit()
-            st.rerun()
     elif query:
         st.caption("No official ACGME targets matched that search.")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Approve checked", type="primary", key=f"approve_candidates_{source['id']}"):
-            inserted = approve_candidate_review(conn, int(source["id"]), selected_ids)
-            st.success(f"Approved {len(selected_ids)} mappings; created {inserted} new entries.")
-            st.rerun()
-    with c2:
-        if st.button("Reject all / skip case", key=f"reject_candidates_{source['id']}"):
-            approve_candidate_review(conn, int(source["id"]), set())
-            st.rerun()
+    if st.button("Approve checked", type="primary", key=f"approve_candidates_{source['id']}"):
+        if checked_results:
+            selected_ids.update(add_manual_candidates(conn, int(source["id"]), checked_results))
+        inserted = approve_candidate_review(conn, int(source["id"]), selected_ids)
+        st.success(f"Approved {len(selected_ids)} mappings; created {inserted} new entries.")
+        st.rerun()
 
 
 def mapping_form(
