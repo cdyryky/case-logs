@@ -10,7 +10,7 @@ from app.config_io import load_dropdowns
 from app.config_io import load_resident_profile
 from app.constants import DEFAULT_CASE_CLASS, DEFAULT_DB_PATH, DEFAULT_SITE
 from app.export_payload import export_approved_json
-from app.importer import import_xlsx
+from app.importer import import_mpower_csv, import_xlsx
 from app.learning import append_learned_rule, apply_mapping_to_matching_unsubmitted, learned_rule_count
 from app.models import connect, init_db, log_event, utc_now
 from app.review_queue import (
@@ -387,9 +387,9 @@ conn = get_conn()
 
 with st.sidebar:
     st.header("Import")
-    uploaded = st.file_uploader("Visage/mPower XLSX", type=["xlsx"])
-    import_path = st.text_input("Or local XLSX path", "visage-data-export.xlsx")
-    if st.button("Import XLSX", type="primary"):
+    uploaded = st.file_uploader("Visage XLSX or mPower CSV", type=["xlsx", "csv"])
+    import_path = st.text_input("Or local import path", "data/exports/mpower-download-260526-clean.csv")
+    if st.button("Import file", type="primary"):
         path: str | Path
         if uploaded:
             tmp = Path("data/imports") / uploaded.name
@@ -399,7 +399,8 @@ with st.sidebar:
         else:
             path = import_path
         with st.spinner("Importing and mapping cases..."):
-            summary = import_xlsx(conn, path)
+            suffix = Path(path).suffix.lower()
+            summary = import_mpower_csv(conn, path) if suffix == ".csv" else import_xlsx(conn, path)
         st.success(f"Imported {summary['row_count']} rows; generated {summary['generated_entries_count']} entries.")
 
     st.header("Export")

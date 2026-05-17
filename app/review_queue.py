@@ -8,7 +8,7 @@ from .constants import DEFAULT_CASE_CLASS, DEFAULT_SITE
 from .importer import insert_generated_entries, update_source_mapping_status
 from .mapper import load_mapping_rules, map_source_case
 from .matching import suggest_mappings
-from .utils import case_year_from_date, format_acgme_date, patient_type
+from .utils import case_year_from_date, format_acgme_date, patient_type, patient_type_from_age
 
 
 def source_row_to_mapping_source(row: sqlite3.Row, profile: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -21,11 +21,18 @@ def source_row_to_mapping_source(row: sqlite3.Row, profile: dict[str, Any] | Non
         "accession_number": row["accession_number"],
         "study_date": row["study_date"],
         "patient_birth_date": row["patient_birth_date"],
+        "patient_age_years": row["patient_age_years"] if "patient_age_years" in row.keys() else None,
         "exam_code": row["exam_code"] or "",
         "study_description": row["study_description"] or "",
         "report_snippet": row["report_snippet"] or "",
         "procedure_text": row["procedure_text"] or "",
         "institution_name": row["institution_name"] or "",
+        "source_format": row["source_format"] if "source_format" in row.keys() else "visage_xlsx",
+        "source_row_number": row["source_row_number"] if "source_row_number" in row.keys() else None,
+        "modality": row["modality"] if "modality" in row.keys() else "",
+        "cpt_code": row["cpt_code"] if "cpt_code" in row.keys() else "",
+        "duplicate_accession_flag": row["duplicate_accession_flag"] if "duplicate_accession_flag" in row.keys() else 0,
+        "parsed_report_json": row["parsed_report_json"] if "parsed_report_json" in row.keys() else None,
         "principal_result_interpreter_raw": row["principal_result_interpreter_raw"] or "",
         "attending_name": row["attending_name"] or "",
         "source_row_hash": row["source_row_hash"],
@@ -47,10 +54,14 @@ def source_row_to_mapping_source(row: sqlite3.Row, profile: dict[str, Any] | Non
             "role": "Secondary" if found_resident and resident_position and resident_position > 1 else "Primary",
             "role_confidence": "high" if found_resident else "low",
             "site": defaults.get("site", DEFAULT_SITE),
-            "patient_type": patient_type(
-                row["study_date"],
-                row["patient_birth_date"],
-                int(defaults.get("pediatric_age_cutoff", 18)),
+            "patient_type": (
+                patient_type_from_age(row["patient_age_years"], int(defaults.get("pediatric_age_cutoff", 18)))
+                if ("patient_age_years" in row.keys() and row["patient_age_years"] not in (None, ""))
+                else patient_type(
+                    row["study_date"],
+                    row["patient_birth_date"],
+                    int(defaults.get("pediatric_age_cutoff", 18)),
+                )
             ),
             "case_class": defaults.get("case_class", DEFAULT_CASE_CLASS),
         },

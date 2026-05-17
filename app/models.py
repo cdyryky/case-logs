@@ -33,6 +33,107 @@ def ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
 
+SOURCE_CASE_COLUMNS = [
+    "id",
+    "accession_number",
+    "study_date",
+    "patient_birth_date",
+    "patient_age_years",
+    "exam_code",
+    "study_description",
+    "report_snippet",
+    "procedure_text",
+    "institution_name",
+    "source_format",
+    "source_row_number",
+    "modality",
+    "cpt_code",
+    "duplicate_accession_flag",
+    "parsed_report_json",
+    "principal_result_interpreter_raw",
+    "attending_name",
+    "source_file_name",
+    "import_id",
+    "source_row_hash",
+    "resident_found_in_report",
+    "resident_position",
+    "role_parse_source",
+    "aborted_flag",
+    "unsuccessful_flag",
+    "no_procedure_flag",
+    "source_mapping_status",
+    "needs_review_reason",
+    "imported_at",
+]
+
+
+def _create_source_cases_sql(table_name: str = "source_cases") -> str:
+    return f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+          id INTEGER PRIMARY KEY,
+          accession_number TEXT NOT NULL,
+          study_date TEXT NOT NULL,
+          patient_birth_date TEXT,
+          patient_age_years TEXT,
+          exam_code TEXT,
+          study_description TEXT,
+          report_snippet TEXT,
+          procedure_text TEXT,
+          institution_name TEXT,
+          source_format TEXT NOT NULL DEFAULT 'visage_xlsx',
+          source_row_number INTEGER,
+          modality TEXT,
+          cpt_code TEXT,
+          duplicate_accession_flag INTEGER NOT NULL DEFAULT 0,
+          parsed_report_json TEXT,
+          principal_result_interpreter_raw TEXT,
+          attending_name TEXT,
+          source_file_name TEXT,
+          import_id INTEGER,
+          source_row_hash TEXT NOT NULL,
+          resident_found_in_report INTEGER,
+          resident_position INTEGER,
+          role_parse_source TEXT,
+          aborted_flag INTEGER NOT NULL DEFAULT 0,
+          unsuccessful_flag INTEGER NOT NULL DEFAULT 0,
+          no_procedure_flag INTEGER NOT NULL DEFAULT 0,
+          source_mapping_status TEXT NOT NULL DEFAULT 'unmapped',
+          needs_review_reason TEXT,
+          imported_at TEXT NOT NULL,
+          UNIQUE(source_format, accession_number, study_date, exam_code, source_row_hash),
+          FOREIGN KEY(import_id) REFERENCES imports(id)
+        );
+    """
+
+
+def migrate_source_cases_unique_constraint(conn: sqlite3.Connection) -> None:
+    old_unique_exists = False
+    for index in conn.execute("PRAGMA index_list(source_cases)"):
+        if not index["unique"]:
+            continue
+        cols = [row["name"] for row in conn.execute(f"PRAGMA index_info({index['name']})")]
+        if cols == ["accession_number", "study_date", "exam_code"]:
+            old_unique_exists = True
+            break
+    if not old_unique_exists:
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("DROP TABLE IF EXISTS source_cases_new")
+    conn.executescript(_create_source_cases_sql("source_cases_new").replace("IF NOT EXISTS ", ""))
+    cols = ", ".join(SOURCE_CASE_COLUMNS)
+    conn.execute(
+        f"""
+        INSERT OR IGNORE INTO source_cases_new({cols})
+        SELECT {cols}
+        FROM source_cases
+        """
+    )
+    conn.execute("DROP TABLE source_cases")
+    conn.execute("ALTER TABLE source_cases_new RENAME TO source_cases")
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 @contextmanager
 def db(db_path: str | Path = DEFAULT_DB_PATH) -> Iterable[sqlite3.Connection]:
     conn = connect(db_path)
@@ -55,34 +156,6 @@ def init_db(conn: sqlite3.Connection) -> None:
           new_source_cases INTEGER NOT NULL,
           duplicate_source_cases INTEGER NOT NULL,
           generated_entries_count INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS source_cases (
-          id INTEGER PRIMARY KEY,
-          accession_number TEXT NOT NULL,
-          study_date TEXT NOT NULL,
-          patient_birth_date TEXT,
-          exam_code TEXT,
-          study_description TEXT,
-          report_snippet TEXT,
-          procedure_text TEXT,
-          institution_name TEXT,
-          principal_result_interpreter_raw TEXT,
-          attending_name TEXT,
-          source_file_name TEXT,
-          import_id INTEGER,
-          source_row_hash TEXT NOT NULL,
-          resident_found_in_report INTEGER,
-          resident_position INTEGER,
-          role_parse_source TEXT,
-          aborted_flag INTEGER NOT NULL DEFAULT 0,
-          unsuccessful_flag INTEGER NOT NULL DEFAULT 0,
-          no_procedure_flag INTEGER NOT NULL DEFAULT 0,
-          source_mapping_status TEXT NOT NULL DEFAULT 'unmapped',
-          needs_review_reason TEXT,
-          imported_at TEXT NOT NULL,
-          UNIQUE(accession_number, study_date, exam_code),
-          FOREIGN KEY(import_id) REFERENCES imports(id)
         );
 
         CREATE TABLE IF NOT EXISTS generated_entries (
@@ -123,8 +196,6 @@ def init_db(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_generated_review_upload
           ON generated_entries(review_status, upload_status);
-        CREATE INDEX IF NOT EXISTS idx_source_accession
-          ON source_cases(accession_number);
 
         CREATE TABLE IF NOT EXISTS baseline_submissions (
           id INTEGER PRIMARY KEY,
@@ -159,6 +230,27 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
 
         INSERT OR IGNORE INTO upload_session(id, updated_at) VALUES (1, datetime('now'));
+        """
+    )
+    conn.executescript(_create_source_cases_sql())
+    ensure_columns(
+        conn,
+        "source_cases",
+        {
+            "patient_age_years": "TEXT",
+            "source_format": "TEXT NOT NULL DEFAULT 'visage_xlsx'",
+            "source_row_number": "INTEGER",
+            "modality": "TEXT",
+            "cpt_code": "TEXT",
+            "duplicate_accession_flag": "INTEGER NOT NULL DEFAULT 0",
+            "parsed_report_json": "TEXT",
+        },
+    )
+    migrate_source_cases_unique_constraint(conn)
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_source_accession
+          ON source_cases(accession_number);
         """
     )
     ensure_columns(

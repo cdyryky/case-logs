@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -7,11 +9,11 @@ from pathlib import Path
 from datetime import datetime
 
 from app.learning import append_learned_rule
-from app.importer import insert_generated_entries, insert_source_case
+from app.importer import import_mpower_csv, insert_generated_entries, insert_source_case
 from app.matching import match_tokens
 from app.mapper import load_mapping_rules, map_source_case
 from app.models import init_db
-from app.parser import transform_source_row
+from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row, transform_source_row
 from app.review_queue import remap_unresolved_cases
 from app.upload_queue import (
     claim_next,
@@ -58,6 +60,158 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(entries[0]["area"], "Venous Access General")
         self.assertEqual(entries[0]["type"], "Venous port placement")
         self.assertEqual(entries[0]["review_status"], "new_high_confidence")
+
+    def test_mpower_transform_parses_decimal_age_and_metadata(self) -> None:
+        raw = {
+            "Accession Number": "202501300043",
+            "Modality": "US",
+            "Exam Code": "USGUDPARAC",
+            "Exam Description": "US GUIDED PARACENTESIS",
+            "CPT Code": "",
+            "Report Text": (
+                "ULTRASOUND-GUIDED PARACENTESIS\n"
+                "EXAM DATE: 1/30/2025 8:00 AM\n\n"
+                "PROCEDURE PERSONNEL:\n"
+                "Attending: Example Attending, MD\n"
+                "Other: Cody Key, M.D.\n\n"
+                "TECHNIQUE:\n"
+                "Ultrasound-guided diagnostic paracentesis was performed.\n"
+            ),
+            "Patient Age": "1.58",
+            "Exam Started Date": "2025-01-30 08:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw, duplicate_accession=True)
+        parsed = json.loads(source["parsed_report_json"])
+        self.assertEqual(source["source_format"], "mpower_csv")
+        self.assertEqual(source["source_row_number"], 2)
+        self.assertEqual(source["patient_age_years"], "1.58")
+        self.assertEqual(source["derived"]["patient_type"], "Pediatric")
+        self.assertEqual(source["attending_name"], "Example Attending")
+        self.assertEqual(source["cpt_code"], "")
+        self.assertEqual(source["role_parse_source"], "personnel_other_line")
+        self.assertEqual(source["derived"]["role"], "Primary")
+        self.assertEqual(parsed["procedure_title"], "ULTRASOUND-GUIDED PARACENTESIS")
+        self.assertIn("duplicate_accession", source["needs_review_reason"])
+
+    def test_mpower_report_parser_handles_numbered_procedures_and_prefixed_summary(self) -> None:
+        report = (
+            "PROCEDURES:\n"
+            "1. Inferior vena cava filter insertion\n"
+            "2. Genitourinary catheter exchange\n"
+            "3. Renal transarterial embolization\n\n"
+            "Date of service: 7/27/2025 3:53 PM\n\n"
+            "Procedural Personnel\n"
+            "Attending physician(s): Example Attending, MD\n"
+            "Resident physician(s): Cody Key, MD\n\n"
+            "IMPRESSION:\n"
+            "1. Insertion of inferior vena cava filter.\n"
+            "2. Right renal angiography with embolization.\n\n"
+            "IVC FILTER PLACEMENT PROCEDURE SUMMARY:\n"
+            "- IVC filter insertion under fluoroscopic guidance\n"
+            "- Additional procedure(s): None\n\n"
+            "RENAL ARTERIOGRAPHY AND EMBOLIZATION PROCEDURE SUMMARY:\n"
+            "- Renal angiography and embolization\n"
+            "- Additional procedure(s): Cone-beam CT\n\n"
+            "PROCEDURE DETAILS:\n"
+            "Details omitted.\n"
+        )
+        parsed = parse_mpower_report(report, ["Cody Key"])
+        self.assertEqual(parsed["procedure_title_source"], "procedures_label")
+        self.assertIn("Renal transarterial embolization", parsed["procedure_list"])
+        self.assertEqual(len(parsed["procedure_summary_sections"]), 2)
+        self.assertIn("Cone-beam CT", parsed["candidate_procedure_phrases"])
+        self.assertNotIn("missing_impression", parsed["parse_warnings"])
+
+    def test_mpower_report_parser_handles_date_first_resident_block(self) -> None:
+        report = (
+            "DATE OF PROCEDURE: 3/27/25\n\n"
+            "PROCEDURE:\n"
+            "1. Lumbar spinal puncture with fluoroscopic guidance\n"
+            "2. Digital subtraction myelogram\n\n"
+            "SURGEON:\n"
+            "Example Surgeon, MD\n\n"
+            "RESIDENT:\n"
+            "Clayton Example, MD\n"
+            "Cody Key, MD\n\n"
+            "SEDATION:\n"
+            "Moderate sedation.\n"
+        )
+        parsed = parse_mpower_report(report, ["Cody Key"])
+        role = parse_mpower_role_metadata(report, ["Cody Key"])
+        self.assertIn("Digital subtraction myelogram", parsed["procedure_title"])
+        self.assertEqual(role["role_parse_source"], "resident_heading")
+        self.assertEqual(role["role"], "Secondary")
+        self.assertEqual(role["role_confidence"], "high")
+
+    def test_mpower_role_ignores_other_outside_personnel_section(self) -> None:
+        report = (
+            "PROCEDURE: Drainage catheter check\n\n"
+            "Procedural Personnel\n"
+            "Attending physician(s): Example Attending, MD\n"
+            "Resident physician(s): None\n\n"
+            "FINDINGS:\n"
+            "Other: Cody Key observed a small residual collection.\n"
+        )
+        role = parse_mpower_role_metadata(report, ["Cody Key"])
+        self.assertEqual(role["role_confidence"], "low")
+        self.assertEqual(role["role_parse_source"], "personnel_no_resident_match")
+
+    def test_mpower_role_marks_fellow_only_match_low_confidence(self) -> None:
+        report = (
+            "PROCEDURE: Fluid collection aspiration\n\n"
+            "Procedural Personnel\n"
+            "Attending physician(s): Example Attending, MD\n"
+            "Fellow physician(s): Cody Key, MD\n"
+            "Resident physician(s): None\n"
+            "Advanced practice provider(s): None\n\n"
+            "IMPRESSION:\n"
+            "Successful aspiration.\n"
+        )
+        role = parse_mpower_role_metadata(report, ["Cody Key"])
+        self.assertEqual(role["role_parse_source"], "non_resident_personnel_line")
+        self.assertEqual(role["role_confidence"], "low")
+        self.assertTrue(role["resident_found_in_report"])
+
+    def test_import_mpower_csv_dedupes_exact_hash_and_persists_parsed_json(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        row = {
+            "Accession Number": "202601010001",
+            "Modality": "IR",
+            "Exam Code": "IRUNKNOWN",
+            "Exam Description": "IR EXAMPLE PROCEDURE",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Example procedure\n\n"
+                "Procedural Personnel\n"
+                "Attending physician(s): Example Attending, MD\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful example procedure.\n"
+            ),
+            "Patient Age": "18",
+            "Exam Started Date": "2026-01-01 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mpower.csv"
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+                writer.writerow(row)
+            summary = import_mpower_csv(conn, path)
+        self.assertEqual(summary["row_count"], 2)
+        self.assertEqual(summary["new_source_cases"], 1)
+        self.assertEqual(summary["duplicate_source_cases"], 1)
+        source = conn.execute("SELECT * FROM source_cases").fetchone()
+        self.assertEqual(source["source_format"], "mpower_csv")
+        self.assertEqual(source["source_row_number"], 2)
+        self.assertEqual(source["duplicate_accession_flag"], 1)
+        self.assertEqual(json.loads(source["parsed_report_json"])["procedure_title"], "Example procedure")
 
     def test_port_removal_targets_exact_acgme_row(self) -> None:
         raw = {

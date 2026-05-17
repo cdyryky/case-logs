@@ -4,6 +4,7 @@ import hashlib
 import re
 import unicodedata
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,11 @@ def file_sha256(path: str | Path) -> str:
     return h.hexdigest()
 
 
-def row_hash(values: dict[str, Any]) -> str:
+def row_hash(values: dict[str, Any], keys: list[str] | None = None) -> str:
+    if keys is not None:
+        safe = {k: values.get(k) for k in keys}
+        raw = repr(sorted((k, str(v)) for k, v in safe.items())).encode()
+        return hashlib.sha256(raw).hexdigest()
     safe = {
         k: values.get(k)
         for k in [
@@ -94,6 +99,25 @@ def patient_type(study_date: Any, birth_date: Any, pediatric_cutoff: int = 18) -
     if bd is None:
         return "Adult"
     return "Pediatric" if age_on_date(bd, parse_study_datetime(study_date)) < pediatric_cutoff else "Adult"
+
+
+def parse_age_years(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def patient_type_from_age(value: Any, pediatric_cutoff: int = 18) -> str:
+    age = parse_age_years(value)
+    if age is None:
+        return "Adult"
+    return "Pediatric" if age < Decimal(pediatric_cutoff) else "Adult"
 
 
 def case_year_from_date(study_date: Any, graduation_year: int, pgy_max: int = 5) -> int:

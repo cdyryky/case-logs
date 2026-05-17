@@ -5,7 +5,7 @@ import json
 
 from .constants import DEFAULT_DB_PATH
 from .export_payload import export_approved_json
-from .importer import import_xlsx
+from .importer import import_mpower_csv, import_xlsx
 from .models import connect, init_db
 
 
@@ -15,6 +15,8 @@ def main() -> None:
     sub.add_parser("init-db")
     import_cmd = sub.add_parser("import-xlsx")
     import_cmd.add_argument("xlsx_path")
+    import_mpower_cmd = sub.add_parser("import-mpower-csv")
+    import_mpower_cmd.add_argument("csv_path")
     export_cmd = sub.add_parser("export-approved")
     export_cmd.add_argument("--output", default=None)
     args = parser.parse_args()
@@ -27,6 +29,9 @@ def main() -> None:
         elif args.command == "import-xlsx":
             summary = import_xlsx(conn, args.xlsx_path)
             print(json.dumps(summary, indent=2))
+        elif args.command == "import-mpower-csv":
+            summary = import_mpower_csv(conn, args.csv_path)
+            print(json.dumps(summary, indent=2))
         elif args.command == "export-approved":
             out = export_approved_json(conn, args.output)
             print(out)
@@ -37,4 +42,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
