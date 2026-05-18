@@ -896,6 +896,62 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(group["codes"][0]["acgme_code"], "31780")
         conn.close()
 
+    def test_api_llm_invalid_json_reports_location(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+
+        inserted, valid, invalid = import_llm_output_text(conn, '[{"case_id": "x"} {"case_id": "y"}]')
+
+        self.assertEqual(inserted, 0)
+        self.assertEqual(valid, [])
+        self.assertEqual(len(invalid), 1)
+        self.assertIn("line 1, column 19", invalid[0]["error"])
+        conn.close()
+
+    def test_api_llm_error_target_allows_empty_phrase(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        row = {
+            "Accession Number": "202601080004",
+            "Modality": "IR",
+            "Exam Code": "IRUNKNOWN",
+            "Exam Description": "IR UNKNOWN",
+            "CPT Code": "",
+            "Report Text": "IMPRESSION:\nNo confident target.\n",
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-08 11:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mpower.csv"
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+            import_mpower_csv(conn, path, mapping_mode="api")
+        case_id = conn.execute("SELECT llm_case_id FROM source_cases").fetchone()["llm_case_id"]
+
+        payload = json.dumps(
+            [
+                {
+                    "case_id": case_id,
+                    "mappings": [{"target": "ERROR", "phrase": "", "confidence": 0}],
+                }
+            ]
+        )
+        inserted, valid, invalid = import_llm_output_text(conn, payload)
+
+        self.assertEqual(inserted, 1)
+        self.assertEqual(len(valid), 1)
+        self.assertEqual(invalid, [])
+        entry = conn.execute("SELECT review_status, area, type FROM generated_entries").fetchone()
+        self.assertEqual(entry["review_status"], "error")
+        self.assertEqual(entry["area"], "ERROR")
+        self.assertEqual(entry["type"], "ERROR")
+        conn.close()
+
     def test_api_llm_pathway_rejects_non_api_sessions(self) -> None:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row

@@ -1483,7 +1483,7 @@ with st.sidebar:
                         st.dataframe(pd.DataFrame(invalid), width="stretch", hide_index=True)
                     else:
                         st.success(f"Imported {inserted} API LLM mappings.")
-                    st.rerun()
+                        st.rerun()
     else:
         st.header("API LLM")
         st.caption("API JSON import is disabled because this SQLite session is locked to another pathway.")

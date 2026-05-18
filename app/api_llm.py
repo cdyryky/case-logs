@@ -190,7 +190,7 @@ def build_api_llm_prompt(case_payload: list[dict[str, Any]]) -> str:
         "Each output object must include the original case_id.",
         "The target value must be copied exactly from the Procedure Targets list.",
         "Do not reword, abbreviate, normalize, or invent targets.",
-        "The phrase value should be the verbatim excerpt from the Impression that best supports the mapping.",
+        "The phrase value should be the verbatim excerpt from the Impression that best supports the mapping; it may be empty only when target is ERROR.",
         "The confidence value must be an integer from 0 to 100.",
         "Choose the most specific clinically appropriate target.",
         "Match by clinical meaning, not surface word overlap.",
@@ -222,7 +222,13 @@ def validate_llm_output(conn: sqlite3.Connection, text: str) -> tuple[list[dict[
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
-        return [], [{"case_id": "", "target": "", "error": f"invalid JSON: {exc.msg}"}], None
+        return [], [
+            {
+                "case_id": "",
+                "target": "",
+                "error": f"invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+            }
+        ], None
     if not isinstance(payload, list):
         return [], [{"case_id": "", "target": "", "error": "top-level JSON value must be an array"}], payload
 
@@ -258,7 +264,7 @@ def validate_llm_output(conn: sqlite3.Connection, text: str) -> tuple[list[dict[
                 errors.append("missing target")
             elif parsed_target.error:
                 errors.append(parsed_target.error)
-            if not phrase:
+            if not phrase and not parsed_target.is_error:
                 errors.append("missing phrase")
             if not isinstance(confidence, int) or isinstance(confidence, bool) or confidence < 0 or confidence > 100:
                 errors.append("confidence must be an integer from 0 to 100")
