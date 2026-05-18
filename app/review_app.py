@@ -23,6 +23,7 @@ from app.models import connect, init_db, log_event, utc_now
 from app.parser import parse_mpower_report
 from app.review_queue import (
     best_report_context_for_source,
+    clear_deterministic_review_state,
     import_scope_summary,
     latest_import,
     load_next_candidate_group,
@@ -844,6 +845,18 @@ with st.sidebar:
         st.success(
             "Checked {checked}; generated {generated_entries} entries across {generated_cases} cases; "
             "{suggested_only} have suggestions only.".format(**summary)
+        )
+        st.rerun()
+
+    st.header("Reset")
+    reset_label = "this import" if active_import_id is not None else "all backlog"
+    confirm_reset = st.checkbox(f"Confirm reset for {reset_label}", key="confirm_clear_non_llm_review")
+    if st.button("Clear non-LLM review cases", disabled=not confirm_reset):
+        with st.spinner("Clearing deterministic review state..."):
+            summary = clear_deterministic_review_state(conn, active_import_id)
+        st.success(
+            "Cleared {deleted_candidates} candidate rows; skipped {skipped_entries} generated non-LLM entries; "
+            "reset {reset_sources} cases.".format(**summary)
         )
         st.rerun()
 

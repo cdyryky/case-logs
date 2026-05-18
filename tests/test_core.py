@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 
 from app.candidates import (
+    ALGORITHM_VERSION,
     add_manual_candidate,
     add_manual_candidates,
     approve_candidate_review,
@@ -30,6 +31,7 @@ from app.mapper import load_mapping_rules, map_source_case
 from app.models import init_db
 from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row
 from app.review_queue import best_report_context_for_source, load_next_candidate_group, remap_unresolved_cases, review_counts
+from app.review_queue import clear_deterministic_review_state
 from app.upload_queue import (
     claim_next,
     claim_next_group,
@@ -1000,7 +1002,7 @@ class CoreTests(unittest.TestCase):
         source = transform_mpower_row(raw)
         checked = [candidate for candidate in build_match_candidates(source) if candidate["default_checked"] == 1]
         checked_codes = {candidate["acgme_code"] for candidate in checked}
-        self.assertEqual(checked_codes, {"31810"})
+        self.assertEqual(checked_codes, {"31809", "31810"})
         self.assertNotIn("31665", checked_codes)
         self.assertNotIn("31812", checked_codes)
 
@@ -1098,6 +1100,221 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(drainage), 1)
         self.assertEqual(drainage[0]["acgme_code"], "31902")
 
+    def test_candidate_generation_splits_angioplasty_and_stenting(self) -> None:
+        raw = {
+            "Accession Number": "202605061000",
+            "Modality": "IR",
+            "Exam Code": "IRLEANGIO",
+            "Exam Description": "Left lower extremity angiography and intervention",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Left lower extremity angiography with angioplasty and stenting\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful balloon angioplasty and stent placement of the left superficial femoral artery.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked = [candidate for candidate in build_match_candidates(source) if candidate["default_checked"] == 1]
+        checked_codes = {candidate["acgme_code"] for candidate in checked}
+        self.assertIn("31653", checked_codes)
+        self.assertIn("31662", checked_codes)
+
+    def test_candidate_generation_splits_venoplasty_and_venous_stent(self) -> None:
+        raw = {
+            "Accession Number": "202605061001",
+            "Modality": "IR",
+            "Exam Code": "IRVENOGRAM",
+            "Exam Description": "Venography with intervention",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Left iliac venography with venoplasty and stenting\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful venoplasty and stent placement of the left common iliac vein.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked_codes = {candidate["acgme_code"] for candidate in build_match_candidates(source) if candidate["default_checked"] == 1}
+        self.assertIn("31707", checked_codes)
+        self.assertIn("31713", checked_codes)
+
+    def test_candidate_generation_prefers_covered_stent_graft_target(self) -> None:
+        raw = {
+            "Accession Number": "202605061002",
+            "Modality": "IR",
+            "Exam Code": "IRILIAC",
+            "Exam Description": "Iliac artery repair",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Right iliac artery repair with covered stent\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful exclusion of the right external iliac artery injury with covered stent placement.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked_codes = {candidate["acgme_code"] for candidate in build_match_candidates(source) if candidate["default_checked"] == 1}
+        self.assertIn("31695", checked_codes)
+        self.assertNotIn("31662", checked_codes)
+
+    def test_candidate_generation_splits_thrombectomy_and_thrombolysis(self) -> None:
+        raw = {
+            "Accession Number": "202605061003",
+            "Modality": "IR",
+            "Exam Code": "IRPETHROMB",
+            "Exam Description": "Pulmonary embolism intervention",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Pulmonary artery thrombectomy and catheter-directed thrombolysis\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful pulmonary artery mechanical thrombectomy and catheter-directed tPA thrombolysis.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked_codes = {candidate["acgme_code"] for candidate in build_match_candidates(source) if candidate["default_checked"] == 1}
+        self.assertIn("31756", checked_codes)
+        self.assertIn("31758", checked_codes)
+
+    def test_candidate_generation_keeps_specific_embolization_targets(self) -> None:
+        cases = [
+            ("uterine fibroid embolization", "Successful uterine artery embolization.", "31681"),
+            ("prostate artery embolization", "Successful prostate artery embolization.", "31682"),
+            ("bronchial artery embolization", "Successful bronchial artery embolization for hemoptysis.", "31683"),
+        ]
+        for idx, (title, impression, expected_code) in enumerate(cases, start=1):
+            raw = {
+                "Accession Number": f"20260506110{idx}",
+                "Modality": "IR",
+                "Exam Code": "IREMBOL",
+                "Exam Description": title,
+                "CPT Code": "",
+                "Report Text": (
+                    f"PROCEDURE: {title}\n\n"
+                    "Resident physician(s): Cody Key, MD\n\n"
+                    "IMPRESSION:\n"
+                    f"{impression}\n"
+                ),
+                "Patient Age": "42",
+                "Exam Started Date": "2026-05-06 10:00:00-07:00",
+                "Report Finalized By": "Attending, Example",
+                "__source_row_number": 2,
+            }
+            source = transform_mpower_row(raw)
+            checked_codes = {candidate["acgme_code"] for candidate in build_match_candidates(source) if candidate["default_checked"] == 1}
+            self.assertIn(expected_code, checked_codes)
+            self.assertNotIn("31684", checked_codes)
+
+    def test_candidate_generation_distinguishes_gu_device_events(self) -> None:
+        raw = {
+            "Accession Number": "202605061004",
+            "Modality": "IR",
+            "Exam Code": "IRGU",
+            "Exam Description": "GU interventions",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURES:\n"
+                "1. Left nephrostomy tube placement\n"
+                "2. Right nephroureteral stent exchange\n"
+                "3. Double-J ureteral stent exchange\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful left nephrostomy tube placement, right nephroureteral stent exchange, and double-J stent exchange.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked_codes = {candidate["acgme_code"] for candidate in build_match_candidates(source) if candidate["default_checked"] == 1}
+        self.assertIn("31836", checked_codes)
+        self.assertIn("31852", checked_codes)
+        self.assertIn("31853", checked_codes)
+
+    def test_candidate_generation_maps_cholangioplasty_to_biliary_stricture_dilation(self) -> None:
+        raw = {
+            "Accession Number": "202605061005",
+            "Modality": "IR",
+            "Exam Code": "IRBILDRCH",
+            "Exam Description": "Biliary drain check",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Cholangioplasty\n\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful cholangioplasty of a biliary stricture.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-05-06 10:00:00-07:00",
+            "Report Finalized By": "Attending, Example",
+            "__source_row_number": 2,
+        }
+        source = transform_mpower_row(raw)
+        checked_codes = {candidate["acgme_code"] for candidate in build_match_candidates(source) if candidate["default_checked"] == 1}
+        self.assertIn("31809", checked_codes)
+        self.assertFalse({"31652", "31653", "31656"} & checked_codes)
+
+    def test_candidate_generation_does_not_infer_intervention_from_diagnostic_or_planned_language(self) -> None:
+        diagnostic = transform_mpower_row(
+            {
+                "Accession Number": "202605061006",
+                "Modality": "IR",
+                "Exam Code": "IRANGIO",
+                "Exam Description": "Diagnostic angiography",
+                "CPT Code": "",
+                "Report Text": (
+                    "PROCEDURE: Diagnostic lower extremity angiography\n\n"
+                    "Resident physician(s): Cody Key, MD\n\n"
+                    "IMPRESSION:\n"
+                    "Diagnostic angiography demonstrated stenosis. No intervention was performed.\n"
+                ),
+                "Patient Age": "42",
+                "Exam Started Date": "2026-05-06 10:00:00-07:00",
+                "Report Finalized By": "Attending, Example",
+                "__source_row_number": 2,
+            }
+        )
+        planned = transform_mpower_row(
+            {
+                "Accession Number": "202605061007",
+                "Modality": "IR",
+                "Exam Code": "IRANGIO",
+                "Exam Description": "Diagnostic angiography",
+                "CPT Code": "",
+                "Report Text": (
+                    "PROCEDURE: Diagnostic pelvic angiography\n\n"
+                    "Resident physician(s): Cody Key, MD\n\n"
+                    "IMPRESSION:\n"
+                    "Diagnostic angiography performed. Possible embolization and planned stent placement were discussed.\n"
+                ),
+                "Patient Age": "42",
+                "Exam Started Date": "2026-05-06 10:00:00-07:00",
+                "Report Finalized By": "Attending, Example",
+                "__source_row_number": 2,
+            }
+        )
+        for source in (diagnostic, planned):
+            checked = [candidate for candidate in build_match_candidates(source) if candidate["default_checked"] == 1]
+            self.assertFalse(any(candidate["type"] in {"Arterial PTA", "Arterial stent", "Arterial embolization"} for candidate in checked))
+
     def test_approve_checked_candidates_creates_entries_and_rejects_unchecked(self) -> None:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
@@ -1172,6 +1389,84 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(queued_source["id"], source_id)
         self.assertTrue(candidates)
         self.assertGreater(conn.execute("SELECT COUNT(*) FROM source_match_candidates").fetchone()[0], 0)
+
+    def test_candidate_queue_ignores_stale_algorithm_candidates(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        raw = {
+            "Accession Number": "202601040010",
+            "Modality": "US",
+            "Exam Code": "USGUDPARAC",
+            "Exam Description": "US GUIDED PARACENTESIS",
+            "CPT Code": "49083",
+            "Report Text": (
+                "PROCEDURE: Paracentesis\n\n"
+                "Resident physician(s): Cody Key\n\n"
+                "IMPRESSION:\n"
+                "Successful ultrasound-guided paracentesis.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-04 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        source = transform_mpower_row(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
+        now = "2026-01-04T18:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO source_match_candidates(
+              source_case_id, candidate_key, case_class, acgme_code, area, type, acgme_description, acgme_def_category,
+              keyword, component_label, score, confidence, default_checked, match_reason, matched_phrases_json,
+              evidence_snippet, event_key, event_label, source_kind, algorithm_version, created_at, updated_at
+            )
+            VALUES (?, ?, 'Interventional Procedures', '31896', 'Drainage Procedures', 'Paracentesis', 'Paracentesis', 'Paracentesis',
+              '', 'old_component', 0.9, 'high', 1, 'old stale candidate', '[]', '', '', '', 'event_alias', 'candidate_v1_old', ?, ?)
+            """,
+            (source_id, f"{source_id}|old", now, now),
+        )
+        self.assertEqual(review_counts(conn)["needs_review"], 0)
+        queued_source, candidates = load_next_candidate_group(conn)
+        self.assertEqual(queued_source["id"], source_id)
+        self.assertTrue(candidates)
+        self.assertTrue(all(candidate["algorithm_version"] == ALGORITHM_VERSION for candidate in candidates))
+
+    def test_clear_deterministic_review_state_removes_pending_candidates_and_non_llm_entries(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        raw = {
+            "Accession Number": "202601040011",
+            "Modality": "US",
+            "Exam Code": "USGUDPARAC",
+            "Exam Description": "US GUIDED PARACENTESIS",
+            "CPT Code": "49083",
+            "Report Text": (
+                "PROCEDURE: Paracentesis\n\n"
+                "Resident physician(s): Cody Key\n\n"
+                "IMPRESSION:\n"
+                "Successful ultrasound-guided paracentesis.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-04 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        source = transform_mpower_row(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
+        store_match_candidates(conn, source_id, build_match_candidates(source))
+        entries, update = map_source_case(source, *load_mapping_rules())
+        insert_generated_entries(conn, source_id, entries)
+        conn.execute("UPDATE source_cases SET source_mapping_status = ? WHERE id = ?", (update["source_mapping_status"], source_id))
+        conn.commit()
+
+        summary = clear_deterministic_review_state(conn)
+
+        self.assertGreater(summary["deleted_candidates"], 0)
+        self.assertGreater(summary["skipped_entries"], 0)
+        self.assertEqual(summary["reset_sources"], 1)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM source_match_candidates WHERE user_status = 'pending'").fetchone()[0], 0)
+        self.assertEqual(conn.execute("SELECT review_status FROM generated_entries").fetchone()["review_status"], "skipped")
+        self.assertEqual(conn.execute("SELECT source_mapping_status FROM source_cases WHERE id = ?", (source_id,)).fetchone()[0], "unmapped")
 
     def test_import_mpower_csv_dedupes_exact_hash_and_persists_parsed_json(self) -> None:
         conn = sqlite3.connect(":memory:")

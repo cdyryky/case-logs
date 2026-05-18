@@ -15,7 +15,7 @@ from .matching import match_tokens, normalize_match_text
 from .models import log_event, utc_now
 from .utils import canonical_key
 
-ALGORITHM_VERSION = "candidate_v4_conservative_events"
+ALGORITHM_VERSION = "candidate_v5_multi_action_events"
 ACGME_TARGETS_PATH = CONFIG_DIR / "acgme_targets.csv"
 
 
@@ -350,7 +350,7 @@ def _has_negative_evidence(value: str) -> bool:
     text = normalize_match_text(value)
     return bool(
         re.search(
-            r"\b(?:not performed|not attempted|no intervention|procedure was not performed|deferred|aborted|unsuccessful|without placement)\b",
+            r"\b(?:not performed|not attempted|no intervention|procedure was not performed|deferred|aborted|unsuccessful|without placement|planned|plan for|possible|considered|will consider|may need)\b",
             text,
         )
     )
@@ -502,9 +502,250 @@ def _combine_event_phrases(phrases: list[str], pattern: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(matched))
 
 
+ACTION_PATTERNS = {
+    "pta": (
+        r"\b(?:angioplasty|balloon (?:dilation|dilatation)|dilation|dilatation|pta|venoplasty|"
+        r"cutting balloon|scoring balloon|high pressure balloon)\b"
+    ),
+    "stent": r"\b(?:stent placement|stenting|stented|endovascular stent|bare metal stent|self expanding stent|balloon expandable stent|relining)\b",
+    "stent_graft": r"\b(?:stent graft|covered stent|endograft|endoprosthesis|tevar|evar|aorto uni iliac|aui)\b",
+    "atherectomy": r"\b(?:atherectomy|plaque excision|directional atherectomy|orbital atherectomy|rotational atherectomy|laser atherectomy)\b",
+    "thrombolysis": r"\b(?:thrombolysis|lysis catheter|catheter directed thrombolysis|cdt|tpa|alteplase|ekos|thrombolytic infusion)\b",
+    "thrombectomy": r"\b(?:mechanical thrombectomy|aspiration thrombectomy|suction thrombectomy|thrombectomy|clot extraction|embolectomy|thrombus maceration|flowtriever|clottriever|penumbra|angiojet)\b",
+    "biliary_stricture_dilation": r"\b(?:bilioplasty|cholangioplasty|biliary stricture dilation|bile duct dilation)\b",
+    "drain_check": r"\b(?:tube check|catheter check|drain check|sinogram|abscessogram)\b",
+}
+
+
+def _append_event(events: list[ProcedureEvent], event: ProcedureEvent) -> None:
+    if not event.phrases:
+        return
+    if any(existing.key == event.key for existing in events):
+        return
+    events.append(event)
+
+
+def _has_any(text: str, pattern: str) -> bool:
+    return bool(re.search(pattern, text, re.I))
+
+
+def _arterial_pta_or_stent_description(source_text: str, action: str) -> tuple[str, str, str, str]:
+    if _has_any(source_text, r"\b(?:tevar|thoracic aorta|descending thoracic|thoracic endograft)\b"):
+        if action == "stent_graft":
+            return "Arterial Interventions", "Aortic stent grafting", "Stent graft thoracic aorta", "Aortic Stent Grafting"
+        return "Arterial Interventions", f"Arterial {action}", f"{'PTA' if action == 'PTA' else 'Stent'} - aorta", "Arterial PTA or Stent"
+    if _has_any(source_text, r"\b(?:evar|abdominal aorta|aaa|infrarenal|aorto uni iliac|aui|aortic)\b"):
+        if action == "stent_graft":
+            return "Arterial Interventions", "Aortic stent grafting", "Straight tube stent graft abdominal aorta", "Aortic Stent Grafting"
+        return "Arterial Interventions", f"Arterial {action}", f"{'PTA' if action == 'PTA' else 'Stent'} - aorta", "Arterial PTA or Stent"
+    if action == "stent_graft" and _has_any(source_text, r"\b(?:iliac|common iliac|external iliac|internal iliac|hypogastric)\b"):
+        return "Arterial Interventions", "Aortic stent grafting", "Iliac artery repair with stent graft", "Aortic Stent Grafting"
+    if _has_any(source_text, r"\b(?:pulmonary artery|pulmonary arterial|pa stent|pa angioplasty)\b"):
+        return "Pulmonary Arterial Interventions", f"Pulmonary artery {'PTA' if action == 'PTA' else 'stent'}", f"Pulmonary artery {'PTA' if action == 'PTA' else 'stent'}", "Arterial PTA or Stent"
+    if _has_any(source_text, r"\b(?:carotid|vertebral|intracranial|extracranial|mca|aca|pca|basilar|cerebral|neuro)\b"):
+        return "Neurovascular Interventions", f"Neuro arterial {'PTA' if action == 'PTA' else 'stent'}", f"Neuro - arterial {'PTA' if action == 'PTA' else 'stent'}", "Neuro dx/intervention"
+    if _has_any(source_text, r"\b(?:iliac artery|common femoral|external iliac artery|internal iliac artery|sfa|superficial femoral|profunda|femoral artery|popliteal|tibial|peroneal|pedal|runoff)\b"):
+        return "Arterial Interventions", f"Arterial {'PTA' if action == 'PTA' else 'stent'}", f"{'PTA' if action == 'PTA' else 'Stent'} - lower extremity artery", "Arterial PTA or Stent"
+    if _has_any(source_text, r"\b(?:subclavian artery|axillary artery|brachial artery|radial artery|ulnar artery|upper extremity artery)\b"):
+        return "Arterial Interventions", f"Arterial {'PTA' if action == 'PTA' else 'stent'}", f"{'PTA artery' if action == 'PTA' else 'Stent -'} upper extremity artery", "Arterial PTA or Stent"
+    if _has_any(source_text, r"\b(?:celiac|hepatic artery|splenic artery|left gastric|gastroduodenal|gda|sma|ima|renal artery|mesenteric|bronchial|intercostal|lumbar|visceral)\b"):
+        return "Arterial Interventions", f"Arterial {'PTA' if action == 'PTA' else 'stent'}", f"{'PTA artery' if action == 'PTA' else 'Stent -'} visceral artery", "Arterial PTA or Stent"
+    return "Arterial Interventions", f"Arterial {'PTA' if action == 'PTA' else 'stent'}", f"{'PTA' if action == 'PTA' else 'Stent'} - lower extremity artery", "Arterial PTA or Stent"
+
+
+def _venous_pta_or_stent_description(source_text: str, action: str) -> tuple[str, str, str, str]:
+    if _has_any(source_text, r"\b(?:portal vein|tips|transjugular intrahepatic)\b"):
+        return "Portal Interventions", f"Portal vein {'PTA' if action == 'PTA' else 'stent'}", f"Portal vein {'PTA' if action == 'PTA' else 'stent'}", "Venous Intervention"
+    if _has_any(source_text, r"\bsvc\b|\bsuperior vena cava\b"):
+        return "Venous Interventions", f"Venous {'PTA' if action == 'PTA' else 'stent'}", f"{'PTA' if action == 'PTA' else 'Stent'} SVC", "Venous Intervention"
+    if _has_any(source_text, r"\bivc\b|\binferior vena cava\b"):
+        return "Venous Interventions", f"Venous {'PTA' if action == 'PTA' else 'stent'}", f"{'PTA' if action == 'PTA' else 'Stent'} IVC", "Venous Intervention"
+    if _has_any(source_text, r"\b(?:brachiocephalic|subclavian vein|central venous|central vein)\b"):
+        desc = "PTA venous central" if action == "PTA" else "Stent brachiocephalic/subclavian vein"
+        return "Venous Interventions", f"Venous {'PTA' if action == 'PTA' else 'stent'}", desc, "Venous Intervention"
+    if _has_any(source_text, r"\b(?:renal vein|gonadal|adrenal|hepatic vein|visceral vein)\b"):
+        desc = "PTA visceral/renal vein" if action == "PTA" else "Stent visceral/renal vein"
+        return "Venous Interventions", f"Venous {'PTA' if action == 'PTA' else 'stent'}", desc, "Venous Intervention"
+    if _has_any(source_text, r"\b(?:upper extremity vein|axillary vein|brachial vein|basilic|cephalic)\b"):
+        desc = "PTA upper extremity vein" if action == "PTA" else "Stent brachiocephalic/subclavian vein"
+        return "Venous Interventions", f"Venous {'PTA' if action == 'PTA' else 'stent'}", desc, "Venous Intervention"
+    return "Venous Interventions", f"Venous {'PTA' if action == 'PTA' else 'stent'}", f"{'PTA' if action == 'PTA' else 'Stent'} lower extremity vein", "Venous Intervention"
+
+
+def _vascular_action_target(source_text: str, action: str) -> tuple[str, str, str, str]:
+    if _has_any(source_text, r"\b(?:fistula|fistulagram|fistulogram|graftogram|avf|avg|dialysis access|dialysis graft|dialysis fistula|access declot)\b"):
+        if action == "PTA":
+            return "Dialysis Shunt Management", "Dialysis access PTA", "Dialysis access PTA", "Dialysis Access"
+        if action == "stent":
+            return "Dialysis Shunt Management", "Dialysis access stent", "Dialysis access stent", "Dialysis Access"
+    if action != "stent_graft" and _has_any(source_text, r"\b(?:venous|vein|venogram|venography|venoplasty|svc|ivc|brachiocephalic|subclavian vein|iliac vein|femoral vein|renal vein|portal vein|tips)\b"):
+        return _venous_pta_or_stent_description(source_text, action)
+    return _arterial_pta_or_stent_description(source_text, action)
+
+
+def _thrombus_target(source_text: str, action: str) -> tuple[str, str, str, str]:
+    is_lysis = action == "thrombolysis"
+    if _has_any(source_text, r"\b(?:pulmonary artery|pulmonary embolism|pe thrombectomy|pe\b)\b"):
+        desc = "Pulmonary artery thrombolysis" if is_lysis else "Pulmonary artery thrombectomy"
+        return "Pulmonary Arterial Interventions", desc, desc, "Thrombolysis/Thrombectomy"
+    if _has_any(source_text, r"\b(?:portal vein|tips)\b"):
+        desc = "Portal vein thrombolysis - initial" if is_lysis else "Portal vein thrombectomy"
+        return "Portal Interventions", desc, desc, "Thrombolysis/Thrombectomy"
+    if _has_any(source_text, r"\b(?:fistula|fistulagram|fistulogram|graftogram|avf|avg|dialysis access|access declot)\b"):
+        return "Dialysis Shunt Management", "Dialysis access thrombectomy/thrombolysis", "Dialysis access thrombectomy/thrombolysis", "Dialysis Access"
+    if _has_any(source_text, r"\b(?:carotid|vertebral|intracranial|mca|aca|pca|basilar|cerebral|neuro)\b"):
+        desc = "Thrombolysis neuro artery" if is_lysis else "Thrombectomy neuro artery"
+        return "Neurovascular Interventions", desc, desc, "Neuro dx/intervention"
+    if _has_any(source_text, r"\b(?:venous|vein|dvt|svc|ivc|brachiocephalic|subclavian vein|iliac vein|femoral vein|renal vein)\b"):
+        if _has_any(source_text, r"\bsvc\b|\bsuperior vena cava\b"):
+            desc = "Thrombolysis catheter SVC" if is_lysis else "Mechanical thrombectomy SVC"
+        elif _has_any(source_text, r"\bivc\b|\binferior vena cava\b"):
+            desc = "Thrombolysis catheter IVC" if is_lysis else "Mechanical thrombectomy IVC"
+        elif _has_any(source_text, r"\b(?:renal vein|visceral vein)\b"):
+            desc = "Thrombolysis catheter visceral/renal vein" if is_lysis else "Mechanical thrombectomy visceral/renal vein"
+        elif _has_any(source_text, r"\b(?:subclavian|upper extremity|axillary|brachial)\b"):
+            desc = "Thrombolysis catheter upper extremity vein" if is_lysis else "Mechanical thrombectomy upper extremity vein"
+        else:
+            desc = "Thrombolysis catheter lower extremity vein" if is_lysis else "Mechanical thrombectomy lower extremity vein"
+        return "Venous Interventions", "Venous thrombolysis - initial" if is_lysis else "Venous mechanical thrombectomy", desc, "Thrombolysis/Thrombectomy"
+    if _has_any(source_text, r"\b(?:aorta|aortic)\b"):
+        desc = "Thrombolysis - aorta" if is_lysis else "Mechanical thrombectomy - aorta"
+    elif _has_any(source_text, r"\b(?:subclavian artery|axillary artery|brachial artery|radial artery|ulnar artery|upper extremity artery)\b"):
+        desc = "Thrombolysis - upper extremity artery (excluding neuro)" if is_lysis else "Mechanical thrombectomy - upper extremity artery"
+    elif _has_any(source_text, r"\b(?:celiac|hepatic artery|splenic artery|sma|ima|renal artery|mesenteric|visceral)\b"):
+        desc = "Thrombolysis - visceral artery" if is_lysis else "Mechanical thrombectomy - visceral artery"
+    else:
+        desc = "Thrombolysis - lower extremity artery" if is_lysis else "Mechanical thrombectomy - lower extremity artery"
+    return "Arterial Interventions", "Arterial thrombolysis - initial" if is_lysis else "Arterial mechanical thrombectomy", desc, "Thrombolysis/Thrombectomy"
+
+
 def procedure_events(source: dict[str, Any] | sqlite3.Row, phrases: list[str]) -> list[ProcedureEvent]:
     events: list[ProcedureEvent] = []
     source_text = _positive_source_text(source, phrases)
+
+    biliary_dilation_phrases = _combine_event_phrases(phrases, ACTION_PATTERNS["biliary_stricture_dilation"])
+    if biliary_dilation_phrases:
+        _append_event(
+            events,
+            ProcedureEvent(
+                key="biliary_stricture_dilation",
+                label="Biliary stricture dilation",
+                phrases=biliary_dilation_phrases,
+                target_area="Biliary Interventions",
+                target_type="Biliary stricture dilation",
+                target_description="Biliary stricture dilation",
+                target_def_category="GI/biliary Intervention; Other",
+                reason="Explicit event: biliary stricture dilation/cholangioplasty.",
+                score=0.96,
+            ),
+        )
+
+    stent_graft_phrases = _combine_event_phrases(phrases, ACTION_PATTERNS["stent_graft"])
+    if stent_graft_phrases:
+        area, typ, description, def_cat = _vascular_action_target(source_text, "stent_graft")
+        _append_event(
+            events,
+            ProcedureEvent(
+                key=f"stent_graft_{canonical_key(description)}",
+                label=description,
+                phrases=stent_graft_phrases,
+                target_area=area,
+                target_type=typ,
+                target_description=description,
+                target_def_category=def_cat,
+                reason="Explicit event: covered stent/stent graft.",
+                score=0.96,
+            ),
+        )
+
+    pta_phrases = tuple(
+        phrase
+        for phrase in _combine_event_phrases(phrases, ACTION_PATTERNS["pta"])
+        if not re.search(r"\b(?:biliary|bile duct|cholangioplasty|bilioplasty|ureteroplasty|gastrointestinal|gi stricture)\b", normalize_match_text(phrase), re.I)
+    )
+    if pta_phrases:
+        area, typ, description, def_cat = _vascular_action_target(source_text, "PTA")
+        _append_event(
+            events,
+            ProcedureEvent(
+                key=f"pta_{canonical_key(description)}",
+                label=description,
+                phrases=pta_phrases,
+                target_area=area,
+                target_type=typ,
+                target_description=description,
+                target_def_category=def_cat,
+                reason="Explicit event: angioplasty/PTA.",
+                score=0.95,
+            ),
+        )
+
+    generic_stent_phrases = tuple(
+        phrase
+        for phrase in _combine_event_phrases(phrases, ACTION_PATTERNS["stent"])
+        if phrase not in stent_graft_phrases
+        and not re.search(r"\b(?:biliary|ureteral|ureter|nephroureteral|double j|jj stent|airway|tracheal|bronchial)\b", normalize_match_text(phrase), re.I)
+    )
+    if generic_stent_phrases:
+        area, typ, description, def_cat = _vascular_action_target(source_text, "stent")
+        _append_event(
+            events,
+            ProcedureEvent(
+                key=f"stent_{canonical_key(description)}",
+                label=description,
+                phrases=generic_stent_phrases,
+                target_area=area,
+                target_type=typ,
+                target_description=description,
+                target_def_category=def_cat,
+                reason="Explicit event: vascular stent placement.",
+                score=0.95,
+            ),
+        )
+
+    atherectomy_phrases = _combine_event_phrases(phrases, ACTION_PATTERNS["atherectomy"])
+    if atherectomy_phrases:
+        if _has_any(source_text, r"\b(?:aorta|aortic)\b"):
+            description = "Atherectomy - aorta"
+        elif _has_any(source_text, r"\b(?:subclavian artery|axillary artery|brachial artery|radial artery|ulnar artery|upper extremity artery)\b"):
+            description = "Atherectomy - upper extremity artery"
+        elif _has_any(source_text, r"\b(?:celiac|hepatic artery|splenic artery|sma|ima|renal artery|mesenteric|visceral)\b"):
+            description = "Atherectomy - visceral artery"
+        else:
+            description = "Atherectomy - lower extremity artery"
+        _append_event(
+            events,
+            ProcedureEvent(
+                key=f"atherectomy_{canonical_key(description)}",
+                label=description,
+                phrases=atherectomy_phrases,
+                target_area="Arterial Interventions",
+                target_type="Arterial atherectomy",
+                target_description=description,
+                target_def_category="Arterial PTA or Stent",
+                reason="Explicit event: atherectomy.",
+                score=0.95,
+            ),
+        )
+
+    for thrombus_action in ("thrombolysis", "thrombectomy"):
+        thrombus_phrases = _combine_event_phrases(phrases, ACTION_PATTERNS[thrombus_action])
+        if thrombus_phrases:
+            area, typ, description, def_cat = _thrombus_target(source_text, thrombus_action)
+            _append_event(
+                events,
+                ProcedureEvent(
+                    key=f"{thrombus_action}_{canonical_key(description)}",
+                    label=description,
+                    phrases=thrombus_phrases,
+                    target_area=area,
+                    target_type=typ,
+                    target_description=description,
+                    target_def_category=def_cat,
+                    reason=f"Explicit event: {thrombus_action}.",
+                    score=0.95,
+                ),
+            )
 
     biliary_stent_pattern = (
         r"\bbiliary\b.*\bstent\b.*\b(?:placement|placed|conversion|internal|plastic|metal)\b|"
@@ -573,21 +814,93 @@ def procedure_events(source: dict[str, Any] | sqlite3.Row, phrases: list[str]) -
 
     embolization_phrases = _combine_event_phrases(phrases, r"\b(?:embolization|embolized|embolize|transarterial embolization)\b")
     if embolization_phrases and not radioembolization_phrases:
-        if re.search(r"\b(?:uterine|uterus|fibroid|uae)\b", source_text):
+        if re.search(r"\b(?:portal vein embolization|pve)\b", source_text):
+            target_area = "Portal Interventions"
+            target_type = "Portal vein embolization"
+            target_description = "Portal vein embolization"
+            target_def = "Embolization"
+            reason = "Explicit event: portal vein embolization."
+        elif re.search(r"\b(?:brto|parto|carto|varices|varix)\b", source_text):
+            target_area = "Portal Interventions"
+            target_type = "BRTO (balloon-occluded retrograde transvenous obliteration)"
+            target_description = "BRTO PARTO CARTO"
+            target_def = "Embolization"
+            reason = "Explicit event: portal variceal embolization/obliteration."
+        elif re.search(r"\b(?:pulmonary artery|pulmonary arterial)\b", source_text):
+            target_area = "Pulmonary Arterial Interventions"
+            target_type = "Pulmonary artery embolization"
+            target_description = "Pulmonary artery embolization"
+            target_def = "Embolization"
+            reason = "Explicit event: pulmonary artery embolization."
+        elif re.search(r"\b(?:gonadal vein|varicocele)\b", source_text):
+            target_area = "Venous Interventions"
+            target_type = "Venous embolization"
+            target_description = "Venous embolization - gonadal vein"
+            target_def = "Embolization"
+            reason = "Explicit event: gonadal vein embolization."
+        elif re.search(r"\b(?:hypogastric vein|internal iliac vein|pelvic congestion)\b", source_text):
+            target_area = "Venous Interventions"
+            target_type = "Venous embolization"
+            target_description = "Venous embolization - hypogastric vein"
+            target_def = "Embolization"
+            reason = "Explicit event: hypogastric/internal iliac vein embolization."
+        elif re.search(r"\b(?:venous malformation|low flow|sclerotherapy).*\b(?:embolization|embolized|sclerotherapy)|\b(?:embolization|embolized|sclerotherapy).*\b(?:venous malformation|low flow)\b", source_text):
+            target_area = "Venous Interventions"
+            target_type = "Vascular malformation embolization"
+            target_description = "Low flow vascular malformation/venous embolization"
+            target_def = "Embolization"
+            reason = "Explicit event: low-flow vascular malformation embolization/sclerotherapy."
+        elif re.search(r"\b(?:avm|arteriovenous malformation|high flow)\b", source_text):
+            target_area = "Venous Interventions"
+            target_type = "Vascular malformation embolization"
+            target_description = "High flow vascular malformation/AVM embolization"
+            target_def = "Embolization"
+            reason = "Explicit event: high-flow vascular malformation/AVM embolization."
+        elif re.search(r"\b(?:lymphatic malformation)\b", source_text):
+            target_area = "Venous Interventions"
+            target_type = "Vascular malformation embolization"
+            target_description = "Lymphatic malformation embolization"
+            target_def = "Embolization"
+            reason = "Explicit event: lymphatic malformation embolization."
+        elif re.search(r"\b(?:thoracic duct|lymphatic leak|chylous leak)\b", source_text):
+            target_area = "Lymphatic Interventions and Other"
+            target_type = "Lymphatic embolization thoracic duct"
+            target_description = "Lymphatic embolization thoracic duct"
+            target_def = "Lymphatic Intervention"
+            reason = "Explicit event: thoracic duct/lymphatic embolization."
+        elif re.search(r"\b(?:uterine|uterus|fibroid|uae)\b", source_text):
+            target_area = "Arterial Interventions"
+            target_type = "Arterial embolization"
             target_description = "Uterine artery embolization"
+            target_def = "Embolization"
             reason = "Explicit event: uterine artery embolization."
+        elif re.search(r"\b(?:prostate|prostatic|pae)\b", source_text):
+            target_area = "Arterial Interventions"
+            target_type = "Arterial embolization"
+            target_description = "Prostate artery embolization"
+            target_def = "Embolization"
+            reason = "Explicit event: prostate artery embolization."
+        elif re.search(r"\b(?:bronchial|hemoptysis)\b", source_text):
+            target_area = "Arterial Interventions"
+            target_type = "Arterial embolization"
+            target_description = "Bronchial artery embolization"
+            target_def = "Embolization"
+            reason = "Explicit event: bronchial artery embolization."
         else:
+            target_area = "Arterial Interventions"
+            target_type = "Arterial embolization"
             target_description = "Other arterial embolization"
+            target_def = "Embolization"
             reason = "Explicit event: arterial embolization."
         events.append(
             ProcedureEvent(
                 key=canonical_key(target_description),
                 label=target_description,
                 phrases=embolization_phrases,
-                target_area="Arterial Interventions",
-                target_type="Arterial embolization",
+                target_area=target_area,
+                target_type=target_type,
                 target_description=target_description,
-                target_def_category="Embolization",
+                target_def_category=target_def,
                 reason=reason,
                 score=0.92,
             )
@@ -685,6 +998,105 @@ def procedure_events(source: dict[str, Any] | sqlite3.Row, phrases: list[str]) -
                 reason="Semantic alias: nephroureteral stent/tube exchange.",
                 score=0.97,
             )
+        )
+
+    nephrostomy_placement_phrases = _combine_event_phrases(
+        phrases,
+        r"\b(?:nephrostomy|pcn)\b.*\b(?:placement|placed|insertion|inserted|creation|new access)\b|"
+        r"\b(?:placement|placed|insertion|inserted|creation|new access)\b.*\b(?:nephrostomy|pcn)\b",
+    )
+    if nephrostomy_placement_phrases and not re.search(r"\bnephroureteral\b", " ".join(normalize_match_text(p) for p in nephrostomy_placement_phrases)):
+        _append_event(
+            events,
+            ProcedureEvent(
+                key="nephrostomy_tube_placement",
+                label="Nephrostomy tube placement",
+                phrases=nephrostomy_placement_phrases,
+                target_area="GU Intervention",
+                target_type="Nephrostomy tube placement",
+                target_description="Nephrostomy tube placement",
+                target_def_category="Primary Nephrostomy",
+                reason="Explicit event: nephrostomy tube placement.",
+                score=0.96,
+            ),
+        )
+
+    nephrostomy_exchange_phrases = _combine_event_phrases(
+        phrases,
+        r"\b(?:nephrostomy|pcn)\b.*\b(?:exchange|change|replacement|replaced|upsiz|downsiz)\b|"
+        r"\b(?:exchange|change|replacement|replaced|upsiz|downsiz)\b.*\b(?:nephrostomy|pcn)\b",
+    )
+    if nephrostomy_exchange_phrases and not nephroureteral_phrases:
+        _append_event(
+            events,
+            ProcedureEvent(
+                key="nephrostomy_change",
+                label="Nephrostomy change",
+                phrases=nephrostomy_exchange_phrases,
+                target_area="GU Intervention",
+                target_type="GU tube/stent exchange",
+                target_description="Nephrostomy change",
+                target_def_category="Catheter exchange",
+                reason="Explicit event: nephrostomy exchange/change.",
+                score=0.96,
+            ),
+        )
+
+    double_j_exchange_phrases = _combine_event_phrases(
+        phrases,
+        r"\b(?:double j|double-j|jj|ureteral stent)\b.*\b(?:exchange|change|replacement|replaced)\b|"
+        r"\b(?:exchange|change|replacement|replaced)\b.*\b(?:double j|double-j|jj|ureteral stent)\b",
+    )
+    if double_j_exchange_phrases:
+        local_double_j = [
+            normalize_match_text(phrase)
+            for phrase in double_j_exchange_phrases
+            if re.search(r"\b(?:double j|double-j|jj|ureteral stent)\b", normalize_match_text(phrase), re.I)
+        ]
+        transrenal = bool(local_double_j) and all(
+            re.search(r"\b(?:antegrade|transrenal|nephrostomy)\b", phrase, re.I) for phrase in local_double_j
+        )
+        description = "Double J exchange transrenal" if transrenal else "Double J exchange transurethral"
+        _append_event(
+            events,
+            ProcedureEvent(
+                key=canonical_key(description),
+                label=description,
+                phrases=double_j_exchange_phrases,
+                target_area="GU Intervention",
+                target_type="GU tube/stent exchange",
+                target_description=description,
+                target_def_category="GU Intervention",
+                reason="Explicit event: double-J/ureteral stent exchange.",
+                score=0.95,
+            ),
+        )
+
+    gu_removal_phrases = _combine_event_phrases(
+        phrases,
+        r"\b(?:nephrostomy|nephroureteral|double j|double-j|jj|ureteral stent)\b.*\b(?:removal|removed|retrieval|pulled)\b|"
+        r"\b(?:removal|removed|retrieval|pulled)\b.*\b(?:nephrostomy|nephroureteral|double j|double-j|jj|ureteral stent)\b",
+    )
+    if gu_removal_phrases:
+        if re.search(r"\bnephroureteral\b", source_text):
+            description = "Nephroureteral stent removal"
+        elif re.search(r"\b(?:double j|double-j|jj|ureteral stent)\b", source_text):
+            description = "Ureter double J removal transrenal" if re.search(r"\b(?:antegrade|transrenal|nephrostomy)\b", source_text) else "Ureter double J removal transurethral"
+        else:
+            description = "Nephrostomy removal"
+        _append_event(
+            events,
+            ProcedureEvent(
+                key=canonical_key(description),
+                label=description,
+                phrases=gu_removal_phrases,
+                target_area="GU Intervention",
+                target_type="GU tube/stent removal",
+                target_description=description,
+                target_def_category="Removal",
+                reason="Explicit event: GU tube/stent removal.",
+                score=0.95,
+            ),
         )
 
     ureteroplasty_pattern = r"\b(?:upj\s+)?ureteroplasty\b"
@@ -938,10 +1350,11 @@ def load_candidates(conn: sqlite3.Connection, source_case_id: int) -> list[sqlit
         SELECT *
         FROM source_match_candidates
         WHERE source_case_id = ?
+          AND algorithm_version = ?
           AND user_status IN ('pending', 'accepted', 'rejected')
         ORDER BY COALESCE(user_checked, default_checked) DESC, score DESC, id
         """,
-        (source_case_id,),
+        (source_case_id, ALGORITHM_VERSION),
     ).fetchall()
 
 

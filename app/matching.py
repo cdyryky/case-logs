@@ -31,9 +31,21 @@ ALIAS_GROUPS = [
 
 SYNONYM_GROUPS = [
     {"retrieval", "retrieve", "retrieved", "removal", "remove", "removed"},
-    {"insertion", "insert", "inserted", "placement", "place", "placed"},
-    {"exchange", "exchanged", "change", "changed"},
+    {"insertion", "insert", "inserted", "placement", "place", "placed", "creation", "new"},
+    {"exchange", "exchanged", "change", "changed", "replacement", "replaced", "revision", "converted", "conversion"},
     {"catheter", "tube", "drain"},
+    {"angioplasty", "pta", "plasty", "dilation", "dilatation", "venoplasty"},
+    {"stent", "stenting", "relining"},
+    {"stentgraft", "endograft", "endoprosthesis"},
+    {"thrombolysis", "lysis", "tpa", "alteplase", "cdt", "ekos"},
+    {"thrombectomy", "embolectomy", "aspiration", "suction"},
+    {"embolization", "embolisation", "embolized", "embolize", "occlusion", "devascularization"},
+    {"biopsy", "bx", "fna", "sampling"},
+    {"ablation", "rfa", "mwa", "cryoablation", "cryotherapy", "sclerotherapy"},
+    {"hypogastric", "internal", "iliac"},
+    {"gastrostomy", "g", "peg"},
+    {"gastrojejunostomy", "gj"},
+    {"jejunostomy", "j"},
 ]
 
 TOKEN_SYNONYMS: dict[str, set[str]] = {}

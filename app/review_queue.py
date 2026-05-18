@@ -6,10 +6,11 @@ from typing import Any
 
 from .config_io import load_resident_profile
 from .constants import DEFAULT_CASE_CLASS, DEFAULT_SITE
-from .candidates import ensure_candidates_for_source, load_candidates
+from .candidates import ALGORITHM_VERSION, ensure_candidates_for_source, load_candidates
 from .importer import insert_generated_entries, update_source_mapping_status
 from .mapper import load_mapping_rules, map_source_case, validate_rules
 from .matching import suggest_mappings
+from .models import utc_now
 from .utils import case_year_from_date, format_acgme_date, patient_type, patient_type_from_age
 
 
@@ -197,6 +198,7 @@ def review_counts(conn: sqlite3.Connection, import_id: int | None = None) -> dic
               SELECT source_case_id
               FROM source_match_candidates
               WHERE user_status = 'pending'
+                AND algorithm_version = ?
                 {candidate_scope}
               UNION
               SELECT source_case_id
@@ -206,7 +208,7 @@ def review_counts(conn: sqlite3.Connection, import_id: int | None = None) -> dic
                 {generated_scope}
             )
             """,
-            scope_params * 2,
+            (ALGORITHM_VERSION, *scope_params, *scope_params),
         ).fetchone()[0],
         "upload_failures": conn.execute(
             f"""
@@ -289,13 +291,14 @@ def load_next_candidate_group(conn: sqlite3.Connection, import_id: int | None = 
           FROM source_match_candidates smc
           WHERE smc.source_case_id = sc.id
             AND smc.user_status = 'pending'
+            AND smc.algorithm_version = ?
         )
           AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
           {scope}
         ORDER BY sc.study_date DESC, sc.id
         LIMIT 1
         """,
-            params,
+            (ALGORITHM_VERSION, *params),
         ).fetchone()
     if not source:
         source = conn.execute(
@@ -331,6 +334,83 @@ def load_next_candidate_group(conn: sqlite3.Connection, import_id: int | None = 
         return None, []
     ensure_candidates_for_source(conn, source)
     return source, load_candidates(conn, int(source["id"]))
+
+
+def clear_deterministic_review_state(conn: sqlite3.Connection, import_id: int | None = None) -> dict[str, int]:
+    candidate_scope = (
+        "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = source_match_candidates.source_case_id AND isc.import_id = ?)"
+        if import_id is not None
+        else ""
+    )
+    generated_scope = (
+        "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = generated_entries.source_case_id AND isc.import_id = ?)"
+        if import_id is not None
+        else ""
+    )
+    params = (import_id,) if import_id is not None else ()
+    affected_ids = {
+        int(row["source_case_id"])
+        for row in conn.execute(
+            f"""
+            SELECT source_case_id
+            FROM source_match_candidates
+            WHERE user_status = 'pending'
+              {candidate_scope}
+            """,
+            params,
+        ).fetchall()
+    }
+    affected_ids.update(
+        int(row["source_case_id"])
+        for row in conn.execute(
+            f"""
+            SELECT source_case_id
+            FROM generated_entries
+            WHERE review_status IN ('new_high_confidence', 'needs_review')
+              AND upload_status IN ('not_uploaded', 'reset')
+              AND mapping_rule_id NOT LIKE 'llm:%'
+              {generated_scope}
+            """,
+            params,
+        ).fetchall()
+    )
+    deleted_candidates = conn.execute(
+        f"""
+        DELETE FROM source_match_candidates
+        WHERE user_status = 'pending'
+          {candidate_scope}
+        """,
+        params,
+    ).rowcount
+    skipped_entries = conn.execute(
+        f"""
+        UPDATE generated_entries
+        SET review_status = 'skipped', updated_at = ?
+        WHERE review_status IN ('new_high_confidence', 'needs_review')
+          AND upload_status IN ('not_uploaded', 'reset')
+          AND mapping_rule_id NOT LIKE 'llm:%'
+          {generated_scope}
+        """,
+        (utc_now(), *params),
+    ).rowcount
+    reset_sources = 0
+    if affected_ids:
+        placeholders = ",".join("?" for _ in affected_ids)
+        reset_sources = conn.execute(
+            f"""
+            UPDATE source_cases
+            SET source_mapping_status = 'unmapped'
+            WHERE id IN ({placeholders})
+              AND source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
+            """,
+            tuple(sorted(affected_ids)),
+        ).rowcount
+    conn.commit()
+    return {
+        "deleted_candidates": int(deleted_candidates),
+        "skipped_entries": int(skipped_entries),
+        "reset_sources": int(reset_sources),
+    }
 
 
 def load_next_unmapped(
