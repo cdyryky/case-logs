@@ -1292,16 +1292,23 @@ tab_review, tab_diagnostics, tab_imports = st.tabs(["Review Queue", "Diagnostics
 
 with tab_review:
     counts = review_counts(conn, active_import_id)
-    tab_high, tab_low, tab_no_match, tab_failed = st.tabs(
-        [
-            f"High Confidence ({counts['high_confidence']})",
-            f"Low Confidence ({counts['low_confidence']})",
-            f"No Match ({counts['no_match']})",
-            f"Failed Uploads ({counts['failed_uploads']})",
-        ]
+    queue_labels = {
+        "High Confidence": f"High Confidence ({counts['high_confidence']})",
+        "Low Confidence": f"Low Confidence ({counts['low_confidence']})",
+        "No Match": f"No Match ({counts['no_match']})",
+        "Failed Uploads": f"Failed Uploads ({counts['failed_uploads']})",
+    }
+    active_queue = st.segmented_control(
+        "Review queue",
+        list(queue_labels),
+        format_func=lambda key: queue_labels[str(key)],
+        default=st.session_state.get("active_review_queue", "High Confidence"),
+        key="active_review_queue",
+        label_visibility="collapsed",
     )
+    active_queue = str(active_queue or "High Confidence")
 
-    with tab_high:
+    if active_queue == "High Confidence":
         action_col, note_col = st.columns([1, 3])
         with action_col:
             if st.button("Accept all", type="primary", disabled=counts["high_confidence"] == 0, key="accept_all_high_confidence"):
@@ -1346,7 +1353,7 @@ with tab_review:
                 status="High confidence",
             )
 
-    with tab_low:
+    elif active_queue == "Low Confidence":
         source, candidates = load_next_candidate_group(conn, active_import_id, include_unmapped=False)
         if not source:
             if active_import_id is not None and import_running:
@@ -1384,7 +1391,7 @@ with tab_review:
                     ]
                     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
-    with tab_no_match:
+    elif active_queue == "No Match":
         source, suggestions = load_next_unmapped(conn, require_suggestion=None, import_id=active_import_id)
         if not source:
             st.info("No unmatched source cases in this scope.")
@@ -1396,7 +1403,7 @@ with tab_review:
                 status="No match",
             )
 
-    with tab_failed:
+    else:
         source, entries = load_next_failed_upload_group(conn, active_import_id)
         if not source:
             st.info("No failed uploads in this scope.")
