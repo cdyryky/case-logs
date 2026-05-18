@@ -36,6 +36,28 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .settings {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 5px;
+        margin-bottom: 7px;
+      }
+      .settings label {
+        display: grid;
+        gap: 3px;
+        color: #49566b;
+        font-size: 10px;
+        font-weight: 700;
+      }
+      select,
+      input[type="number"] {
+        width: 100%;
+        border: 1px solid #c5ccd8;
+        border-radius: 5px;
+        padding: 5px 6px;
+        font: inherit;
+        background: #fff;
+      }
       #gui-view[hidden],
       #start-view[hidden] {
         display: none;
@@ -210,6 +232,23 @@
     <header>ACGME IR Autofill</header>
     <main id="popup-main" class="start-only">
       <div id="start-view">
+        <div class="settings">
+          <label>
+            Upload Mode
+            <select id="upload-mode">
+              <option value="manual">Manual Review</option>
+              <option value="auto">Auto Upload</option>
+            </select>
+          </label>
+          <label>
+            Delay Min
+            <input id="delay-min" type="number" min="0" step="100" value="500">
+          </label>
+          <label>
+            Delay Max
+            <input id="delay-max" type="number" min="0" step="100" value="1500">
+          </label>
+        </div>
         <div id="start-actions" class="actions start">
           <button id="start-queue" class="primary" type="button">Start Queue</button>
         </div>

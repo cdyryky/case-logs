@@ -27,6 +27,9 @@ const currentCodesEl = document.getElementById("current-codes");
 const addedCodesEl = document.getElementById("added-codes");
 const searchResultsEl = document.getElementById("search-results");
 const codeSearchEl = document.getElementById("code-search");
+const uploadModeEl = document.getElementById("upload-mode");
+const delayMinEl = document.getElementById("delay-min");
+const delayMaxEl = document.getElementById("delay-max");
 
 function setStatus(text) {
   statusEl.textContent = text || "";
@@ -49,7 +52,7 @@ function codeLabel(code) {
 
 function setBusy(nextBusy) {
   busy = nextBusy;
-  document.querySelectorAll("button, input").forEach(el => {
+  document.querySelectorAll("button, input, select").forEach(el => {
     if (el.id !== "code-search") el.disabled = busy;
   });
 }
@@ -200,6 +203,59 @@ async function prepareNext(status = "Preparing next case...") {
     }).catch(() => {});
     renderCase(null);
     throw err;
+  }
+}
+
+function jitterDelayMs() {
+  const min = Math.max(0, Number(delayMinEl.value || 500));
+  const max = Math.max(min, Number(delayMaxEl.value || 1500));
+  return Math.round(min + Math.random() * (max - min));
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForPortalReady() {
+  const tab = await activeTab();
+  await ensureContentScript(tab);
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const response = await callContent(tab.id, {action: "ping"});
+    if (response?.ok) return;
+    await sleep(100);
+  }
+}
+
+async function autoUploadLoop() {
+  showView("gui");
+  let submittedCount = 0;
+  while (true) {
+    setStatus(submittedCount ? `Submitted ${submittedCount}; claiming next...` : "Claiming next accepted case...");
+    const data = await api("/queue/group/claim_next", {method: "POST"});
+    if (!data.case) {
+      renderCase(null);
+      setStatus(submittedCount ? `Auto upload complete. Submitted ${submittedCount}.` : "No accepted cases available.");
+      return;
+    }
+    renderCase(data.case);
+    try {
+      await fillAndMark(data.case, "Auto filling case...");
+      setStatus("Auto submitting in ACGME...");
+      await sendToContent("submitPage", data.case);
+      await api(`/queue/group/${data.case.source_case_id}/submitted`, {method: "POST"});
+      submittedCount += 1;
+      const delay = jitterDelayMs();
+      setStatus(`Submitted #${data.case.source_case_id}; waiting ${delay} ms...`);
+      await sleep(delay);
+      await waitForPortalReady();
+    } catch (err) {
+      await api(`/queue/group/${data.case.source_case_id}/failed`, {
+        method: "POST",
+        body: {failure_reason: err.message}
+      }).catch(() => {});
+      renderCase(null);
+      throw err;
+    }
   }
 }
 
@@ -439,7 +495,11 @@ document.getElementById("start-queue").addEventListener("click", async () => {
   try {
     setBusy(true);
     setStartStatus("");
-    await prepareNext("Starting queue...");
+    if (uploadModeEl.value === "auto") {
+      await autoUploadLoop();
+    } else {
+      await prepareNext("Starting queue...");
+    }
   } catch (err) {
     if (guiViewEl.hidden) {
       setStartStatus(err.message);

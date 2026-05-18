@@ -59,6 +59,8 @@ SOURCE_CASE_COLUMNS = [
     "source_file_name",
     "import_id",
     "source_row_hash",
+    "llm_case_id",
+    "mapping_pathway",
     "resident_found_in_report",
     "resident_position",
     "role_parse_source",
@@ -95,6 +97,8 @@ def _create_source_cases_sql(table_name: str = "source_cases") -> str:
           source_file_name TEXT,
           import_id INTEGER,
           source_row_hash TEXT NOT NULL,
+          llm_case_id TEXT,
+          mapping_pathway TEXT NOT NULL DEFAULT 'ollama',
           resident_found_in_report INTEGER,
           resident_position INTEGER,
           role_parse_source TEXT,
@@ -105,6 +109,7 @@ def _create_source_cases_sql(table_name: str = "source_cases") -> str:
           needs_review_reason TEXT,
           imported_at TEXT NOT NULL,
           UNIQUE(source_format, accession_number, study_date, exam_code, source_row_hash),
+          UNIQUE(llm_case_id),
           FOREIGN KEY(import_id) REFERENCES imports(id)
         );
     """
@@ -187,7 +192,8 @@ def init_db(conn: sqlite3.Connection) -> None:
           row_count INTEGER NOT NULL,
           new_source_cases INTEGER NOT NULL,
           duplicate_source_cases INTEGER NOT NULL,
-          generated_entries_count INTEGER NOT NULL
+          generated_entries_count INTEGER NOT NULL,
+          mapping_pathway TEXT NOT NULL DEFAULT 'ollama'
         );
 
         CREATE TABLE IF NOT EXISTS import_source_cases (
@@ -238,6 +244,11 @@ def init_db(conn: sqlite3.Connection) -> None:
           failure_timestamp TEXT,
           submitted_at TEXT,
           acgme_confirmation TEXT,
+          evidence_excerpt TEXT,
+          llm_model TEXT,
+          llm_prompt_version TEXT,
+          llm_raw_response_json TEXT,
+          mapping_pathway TEXT NOT NULL DEFAULT 'ollama',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           FOREIGN KEY(source_case_id) REFERENCES source_cases(id)
@@ -345,6 +356,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             "cpt_code": "TEXT",
             "duplicate_accession_flag": "INTEGER NOT NULL DEFAULT 0",
             "parsed_report_json": "TEXT",
+            "llm_case_id": "TEXT",
+            "mapping_pathway": "TEXT NOT NULL DEFAULT 'ollama'",
         },
     )
     migrate_source_cases_unique_constraint(conn)
@@ -407,7 +420,33 @@ def init_db(conn: sqlite3.Connection) -> None:
             "llm_model": "TEXT",
             "llm_prompt_version": "TEXT",
             "llm_raw_response_json": "TEXT",
+            "mapping_pathway": "TEXT NOT NULL DEFAULT 'ollama'",
         },
+    )
+    ensure_columns(
+        conn,
+        "imports",
+        {
+            "mapping_pathway": "TEXT NOT NULL DEFAULT 'ollama'",
+        },
+    )
+    conn.execute(
+        """
+        UPDATE source_cases
+        SET llm_case_id = 'llm_' || substr(source_row_hash, 1, 16)
+        WHERE llm_case_id IS NULL OR llm_case_id = ''
+        """
+    )
+    conn.execute(
+        """
+        UPDATE generated_entries
+        SET mapping_pathway = CASE
+          WHEN mapping_rule_id = 'api-llm' THEN 'api'
+          WHEN mapping_rule_id LIKE 'llm:%' THEN 'ollama'
+          ELSE 'fuzzy'
+        END
+        WHERE mapping_pathway IS NULL OR mapping_pathway = ''
+        """
     )
     conn.commit()
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import hashlib
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,11 +18,20 @@ from .utils import file_sha256
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
+def stable_llm_case_id(source: dict[str, Any]) -> str:
+    seed = "|".join(
+        str(source.get(key) or "")
+        for key in ["source_format", "source_row_hash", "study_date", "exam_code"]
+    )
+    return f"llm_{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:16]}"
+
+
 def insert_source_case(
     conn: sqlite3.Connection,
     source: dict[str, Any],
     source_file_name: str,
     import_id: int,
+    mapping_pathway: str = "ollama",
 ) -> tuple[int, bool]:
     now = utc_now()
     if source.get("source_format") == "mpower_csv":
@@ -33,6 +43,14 @@ def insert_source_case(
             (source["source_row_hash"],),
         ).fetchone()
         if existing_hash:
+            conn.execute(
+                """
+                UPDATE source_cases
+                SET mapping_pathway = ?, llm_case_id = COALESCE(NULLIF(llm_case_id, ''), ?)
+                WHERE id = ?
+                """,
+                (mapping_pathway, source.get("llm_case_id") or stable_llm_case_id(source), existing_hash["id"]),
+            )
             return int(existing_hash["id"]), False
 
     params = {
@@ -55,6 +73,8 @@ def insert_source_case(
             "principal_result_interpreter_raw",
             "attending_name",
             "source_row_hash",
+            "llm_case_id",
+            "mapping_pathway",
             "resident_found_in_report",
             "resident_position",
             "role_parse_source",
@@ -63,6 +83,8 @@ def insert_source_case(
             "no_procedure_flag",
             "needs_review_reason",
         ]},
+        "llm_case_id": source.get("llm_case_id") or stable_llm_case_id(source),
+        "mapping_pathway": mapping_pathway,
         "source_file_name": source_file_name,
         "import_id": import_id,
         "imported_at": now,
@@ -73,14 +95,14 @@ def insert_source_case(
           accession_number, study_date, patient_birth_date, patient_age_years, exam_code, study_description, report_snippet,
           procedure_text, institution_name, source_format, source_row_number, modality, cpt_code,
           duplicate_accession_flag, parsed_report_json, principal_result_interpreter_raw, attending_name,
-          source_file_name, import_id, source_row_hash, resident_found_in_report, resident_position,
+          source_file_name, import_id, source_row_hash, llm_case_id, mapping_pathway, resident_found_in_report, resident_position,
           role_parse_source, aborted_flag, unsuccessful_flag, no_procedure_flag, needs_review_reason, imported_at
         )
         VALUES (
           :accession_number, :study_date, :patient_birth_date, :patient_age_years, :exam_code, :study_description, :report_snippet,
           :procedure_text, :institution_name, :source_format, :source_row_number, :modality, :cpt_code,
           :duplicate_accession_flag, :parsed_report_json, :principal_result_interpreter_raw, :attending_name,
-          :source_file_name, :import_id, :source_row_hash, :resident_found_in_report, :resident_position,
+          :source_file_name, :import_id, :source_row_hash, :llm_case_id, :mapping_pathway, :resident_found_in_report, :resident_position,
           :role_parse_source, :aborted_flag, :unsuccessful_flag, :no_procedure_flag, :needs_review_reason, :imported_at
         )
         """,
@@ -177,14 +199,14 @@ def insert_generated_entries(
               patient_type, case_class, acgme_code, area, type, acgme_description, acgme_def_category, keyword, comments, mapping_rule_id,
               mapping_rule_version, mapping_rules_file_hash, mapping_rule_name, mapping_confidence,
               role_confidence, compound_flag, review_status, upload_status, evidence_excerpt, llm_model,
-              llm_prompt_version, llm_raw_response_json, created_at, updated_at
+              llm_prompt_version, llm_raw_response_json, mapping_pathway, created_at, updated_at
             )
             VALUES (
               :source_case_id, :dedupe_key, :component_label, :case_id, :case_date, :case_year, :role, :site,
               :patient_type, :case_class, :acgme_code, :area, :type, :acgme_description, :acgme_def_category, :keyword, :comments, :mapping_rule_id,
               :mapping_rule_version, :mapping_rules_file_hash, :mapping_rule_name, :mapping_confidence,
               :role_confidence, :compound_flag, :review_status, 'not_uploaded', :evidence_excerpt, :llm_model,
-              :llm_prompt_version, :llm_raw_response_json, :created_at, :updated_at
+              :llm_prompt_version, :llm_raw_response_json, :mapping_pathway, :created_at, :updated_at
             )
             """,
             {
@@ -194,6 +216,7 @@ def insert_generated_entries(
                 "llm_model": entry.get("llm_model", ""),
                 "llm_prompt_version": entry.get("llm_prompt_version", ""),
                 "llm_raw_response_json": entry.get("llm_raw_response_json", ""),
+                "mapping_pathway": entry.get("mapping_pathway") or ("ollama" if str(entry.get("mapping_rule_id", "")).startswith("llm:") else "fuzzy"),
                 "source_case_id": source_case_id,
                 "created_at": now,
                 "updated_at": now,
@@ -223,7 +246,7 @@ def insert_generated_entries(
                     keyword = ?, comments = ?, mapping_rule_id = ?, mapping_rule_version = ?,
                     mapping_rules_file_hash = ?, mapping_rule_name = ?, mapping_confidence = ?,
                     role_confidence = ?, compound_flag = ?, review_status = ?, evidence_excerpt = ?,
-                    llm_model = ?, llm_prompt_version = ?, llm_raw_response_json = ?, updated_at = ?
+                    llm_model = ?, llm_prompt_version = ?, llm_raw_response_json = ?, mapping_pathway = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -251,6 +274,7 @@ def insert_generated_entries(
                     entry.get("llm_model", ""),
                     entry.get("llm_prompt_version", ""),
                     entry.get("llm_raw_response_json", ""),
+                    entry.get("mapping_pathway") or ("ollama" if str(entry.get("mapping_rule_id", "")).startswith("llm:") else "fuzzy"),
                     now,
                     existing["id"],
                 ),
@@ -281,8 +305,10 @@ def _map_with_llm_or_fallback(
     llm_timeout_seconds: float | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     mode = (mapping_mode or os.environ.get("ACGME_MAPPING_MODE", "llm")).strip().lower()
-    if mode == "legacy":
+    if mode in {"legacy", "fuzzy"}:
         return map_source_case(source, rules, rules_hash, validate=False)
+    if mode == "api":
+        return [], {"source_mapping_status": "api_pending", "needs_review_reason": source.get("needs_review_reason") or ""}
 
     if llm_client is None and llm_timeout_seconds is not None:
         settings = LLMSettings.from_env()
@@ -346,12 +372,19 @@ def import_mpower_csv(
     rules, rules_hash = load_mapping_rules()
     validate_rules(rules)
     file_hash = file_sha256(path)
+    pathway = (mapping_mode or os.environ.get("ACGME_MAPPING_MODE", "llm")).strip().lower()
+    if pathway == "legacy":
+        pathway = "fuzzy"
+    if pathway == "llm":
+        pathway = "ollama"
+    if pathway not in {"fuzzy", "ollama", "api"}:
+        pathway = "ollama"
     import_cur = conn.execute(
         """
-        INSERT INTO imports(filename, file_hash, imported_at, row_count, new_source_cases, duplicate_source_cases, generated_entries_count)
-        VALUES (?, ?, ?, 0, 0, 0, 0)
+        INSERT INTO imports(filename, file_hash, imported_at, row_count, new_source_cases, duplicate_source_cases, generated_entries_count, mapping_pathway)
+        VALUES (?, ?, ?, 0, 0, 0, 0, ?)
         """,
-        (path.name, file_hash, utc_now()),
+        (path.name, file_hash, utc_now(), pathway),
     )
     import_id = int(import_cur.lastrowid)
     _emit_progress(progress_callback, 0, 0, "", "Import started", import_id=import_id)
@@ -370,7 +403,7 @@ def import_mpower_csv(
         accession = str(raw.get("Accession Number") or "").strip()
         _emit_progress(progress_callback, row_count, total_rows, accession, "Parsing source row", import_id=import_id)
         source = transform_mpower_row(raw, duplicate_accession=accession_counts.get(accession, 0) > 1, resident_profile=profile)
-        source_case_id, inserted = insert_source_case(conn, source, path.name, import_id)
+        source_case_id, inserted = insert_source_case(conn, source, path.name, import_id, pathway)
         source_row_number = source.get("source_row_number")
         source_row_number = int(source_row_number) if source_row_number not in (None, "") else row_count
         record_import_source_case(
@@ -394,15 +427,19 @@ def import_mpower_csv(
             )
             conn.commit()
             _emit_progress(progress_callback, row_count, total_rows, accession, "Queued for mapping", import_id=import_id)
-        mode = (mapping_mode or os.environ.get("ACGME_MAPPING_MODE", "llm")).strip().lower()
-        phase = "Mapping with legacy rules" if mode == "legacy" else "Mapping with local LLM"
+        mode = pathway
+        phase = {
+            "fuzzy": "Mapping with legacy rules",
+            "ollama": "Mapping with local LLM",
+            "api": "Storing API LLM source row",
+        }[mode]
         _emit_progress(progress_callback, row_count, total_rows, accession, phase, import_id=import_id)
         entries, source_update = _map_with_llm_or_fallback(
             source,
             rules,
             rules_hash,
             llm_client=llm_client,
-            mapping_mode=mapping_mode,
+            mapping_mode=mode,
             llm_timeout_seconds=llm_timeout_seconds,
         )
         _emit_progress(progress_callback, row_count, total_rows, accession, "Writing generated entries", import_id=import_id)
@@ -446,4 +483,5 @@ def import_mpower_csv(
         "new_source_cases": new_count,
         "duplicate_source_cases": duplicate_count,
         "generated_entries_count": generated_count,
+        "mapping_pathway": pathway,
     }

@@ -10,7 +10,8 @@ from .constants import DEFAULT_CASE_CLASS, ROOT
 from .models import log_event, row_to_dict, utc_now
 from .utils import case_year_from_date
 
-EXPORTABLE_REVIEW = ("approved", "edited")
+EXPORTABLE_REVIEW = ("approved", "edited", "accepted_auto", "accepted_manual", "edited_manual")
+EXPORTABLE_REVIEW_SQL = ",".join("?" for _ in EXPORTABLE_REVIEW)
 AVAILABLE_UPLOAD = ("not_uploaded", "reset")
 ACTIVE_UPLOAD = ("claimed", "autofilled")
 
@@ -35,6 +36,7 @@ def payload_from_entry(row: sqlite3.Row) -> dict[str, Any]:
         "component_label": row["component_label"],
         "mapping_rule_name": row["mapping_rule_name"],
         "mapping_confidence": row["mapping_confidence"],
+        "mapping_pathway": row["mapping_pathway"] if "mapping_pathway" in row.keys() else "",
     }
     for key in ("exam_code", "procedure_text", "study_description", "attending_name"):
         if key in row.keys():
@@ -102,9 +104,9 @@ def _current_group_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         return []
     return conn.execute(
         group_query(
-            """
+            f"""
             ge.source_case_id = ?
-              AND ge.review_status IN (?, ?)
+              AND ge.review_status IN ({EXPORTABLE_REVIEW_SQL})
               AND ge.upload_status IN (?, ?)
             """
         ),
@@ -122,11 +124,11 @@ def claim_next(conn: sqlite3.Connection) -> dict[str, Any] | None:
         return payload_from_entry(current)
 
     row = conn.execute(
-        """
+        f"""
         SELECT ge.*, sc.exam_code, sc.procedure_text, sc.study_description, sc.attending_name
         FROM generated_entries ge
         JOIN source_cases sc ON sc.id = ge.source_case_id
-        WHERE ge.review_status IN (?, ?)
+        WHERE ge.review_status IN ({EXPORTABLE_REVIEW_SQL})
           AND ge.upload_status IN (?, ?)
         ORDER BY id
         LIMIT 1
@@ -157,10 +159,10 @@ def claim_next_group(conn: sqlite3.Connection) -> dict[str, Any] | None:
         return payload_from_group(current)
 
     row = conn.execute(
-        """
+        f"""
         SELECT ge.source_case_id, MIN(ge.id) AS first_entry_id
         FROM generated_entries ge
-        WHERE ge.review_status IN (?, ?)
+        WHERE ge.review_status IN ({EXPORTABLE_REVIEW_SQL})
           AND ge.upload_status IN (?, ?)
         GROUP BY ge.source_case_id
         ORDER BY first_entry_id
@@ -174,9 +176,9 @@ def claim_next_group(conn: sqlite3.Connection) -> dict[str, Any] | None:
 
     rows = conn.execute(
         group_query(
-            """
+            f"""
             ge.source_case_id = ?
-              AND ge.review_status IN (?, ?)
+              AND ge.review_status IN ({EXPORTABLE_REVIEW_SQL})
               AND ge.upload_status IN (?, ?)
             """
         ),
@@ -259,9 +261,9 @@ def update_group_upload_status(
 ) -> dict[str, Any] | None:
     rows = conn.execute(
         group_query(
-            """
+            f"""
             ge.source_case_id = ?
-              AND ge.review_status IN (?, ?)
+              AND ge.review_status IN ({EXPORTABLE_REVIEW_SQL})
               AND ge.upload_status IN (?, ?)
             """
         ),
@@ -333,9 +335,9 @@ def save_group_edit(conn: sqlite3.Connection, source_case_id: int, codes: list[d
         raise KeyError(f"Source case not found: {source_case_id}")
     active_rows = conn.execute(
         group_query(
-            """
+            f"""
             ge.source_case_id = ?
-              AND ge.review_status IN (?, ?)
+              AND ge.review_status IN ({EXPORTABLE_REVIEW_SQL})
               AND ge.upload_status IN (?, ?)
             """
         ),
@@ -442,9 +444,9 @@ def save_group_edit(conn: sqlite3.Connection, source_case_id: int, codes: list[d
 
     selected = conn.execute(
         group_query(
-            """
+            f"""
             ge.source_case_id = ?
-              AND ge.review_status IN (?, ?)
+              AND ge.review_status IN ({EXPORTABLE_REVIEW_SQL})
               AND ge.upload_status IN (?, ?)
             """
         ),

@@ -22,6 +22,15 @@ from app.candidates import (
     search_acgme_targets,
     store_match_candidates,
 )
+from app.api_llm import (
+    ApiLLMError,
+    build_api_llm_prompt,
+    export_case_payload,
+    import_llm_output_text,
+    parse_target_string,
+    require_api_pathway,
+    set_api_review_status,
+)
 from app.learning import append_learned_rule
 from app.importer import import_mpower_csv, insert_generated_entries, insert_source_case
 from app.llm_client import LLMClientError, LLMSettings, OllamaClient
@@ -798,6 +807,110 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(any(event["phase"] == "Mapping with legacy rules" for event in events))
         source_status = conn.execute("SELECT source_mapping_status, needs_review_reason FROM source_cases").fetchone()
         self.assertNotIn("LLM failed", source_status["needs_review_reason"] or "")
+
+    def test_api_llm_target_string_parsing(self) -> None:
+        target = parse_target_string("31780 | Venous port placement")
+        self.assertFalse(target.is_error)
+        self.assertEqual(target.target.acgme_code, "31780")
+        self.assertEqual(parse_target_string(" 31780   |   Venous port placement ").target.acgme_code, "31780")
+        self.assertTrue(parse_target_string("ERROR").is_error)
+        self.assertIn("code-prefixed", parse_target_string("Venous port placement").error)
+        self.assertIn("unknown", parse_target_string("999999 | Missing").error)
+        self.assertIn("mismatch", parse_target_string("31780 | Wrong description").error)
+
+    def test_api_llm_import_exports_minimal_payload_and_queues_accepted_only(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        row = {
+            "Accession Number": "202601080003",
+            "Modality": "IR",
+            "Exam Code": "IRFLUROCASCACCESS",
+            "Exam Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Venous port placement\n\n"
+                "Procedural Personnel\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful venous port placement.\n\n"
+                "PROCEDURE SUMMARY:\n"
+                "- Venous port placement\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-08 11:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mpower.csv"
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+            summary = import_mpower_csv(conn, path, mapping_mode="api")
+
+        self.assertEqual(summary["mapping_pathway"], "api")
+        self.assertEqual(summary["generated_entries_count"], 0)
+        self.assertEqual(conn.execute("SELECT mapping_pathway FROM imports").fetchone()[0], "api")
+        source = conn.execute("SELECT llm_case_id, mapping_pathway FROM source_cases").fetchone()
+        self.assertEqual(source["mapping_pathway"], "api")
+        self.assertTrue(source["llm_case_id"].startswith("llm_"))
+
+        payload = export_case_payload(conn, int(summary["import_id"]))
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(set(payload[0]), {"case_id", "impression", "procedure_summary"})
+        self.assertNotIn("accession", json.dumps(payload).lower())
+        self.assertIn("venous port placement", payload[0]["impression"].lower())
+
+        prompt = build_api_llm_prompt(payload)
+        self.assertIn("Output JSON only", prompt)
+        self.assertIn("31780 | Venous port placement", prompt)
+        self.assertIn(payload[0]["case_id"], prompt)
+
+        llm_output = json.dumps(
+            [
+                {
+                    "case_id": payload[0]["case_id"],
+                    "mappings": [
+                        {
+                            "target": "31780 | Venous port placement",
+                            "phrase": "Successful venous port placement",
+                            "confidence": 94,
+                        }
+                    ],
+                }
+            ]
+        )
+        inserted, valid, invalid = import_llm_output_text(conn, llm_output)
+        self.assertEqual(inserted, 1)
+        self.assertEqual(len(valid), 1)
+        self.assertEqual(invalid, [])
+        self.assertIsNone(claim_next_group(conn))
+
+        entry = conn.execute("SELECT id, review_status, mapping_confidence FROM generated_entries").fetchone()
+        self.assertEqual(entry["review_status"], "pending_review")
+        self.assertEqual(entry["mapping_confidence"], "94")
+        set_api_review_status(conn, [entry["id"]], "accepted_auto")
+        group = claim_next_group(conn)
+        self.assertIsNotNone(group)
+        self.assertEqual(group["codes"][0]["acgme_code"], "31780")
+        conn.close()
+
+    def test_api_llm_pathway_rejects_non_api_sessions(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        with self.assertRaises(ApiLLMError):
+            require_api_pathway(conn, "fuzzy")
+        conn.execute(
+            """
+            INSERT INTO imports(filename, file_hash, imported_at, row_count, new_source_cases, duplicate_source_cases, generated_entries_count, mapping_pathway)
+            VALUES ('x.csv', 'hash', '2026-01-01T00:00:00+00:00', 0, 0, 0, 0, 'ollama')
+            """
+        )
+        with self.assertRaises(ApiLLMError):
+            require_api_pathway(conn, "api")
+        conn.close()
 
     def test_candidate_generation_uses_parsed_multi_procedure_evidence(self) -> None:
         raw = {

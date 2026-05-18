@@ -16,6 +16,19 @@ import streamlit.components.v1 as components
 from app.config_io import load_dropdowns
 from app.config_io import load_resident_profile
 from app.constants import DEFAULT_CASE_CLASS, DEFAULT_DB_PATH, DEFAULT_SITE
+from app.api_llm import (
+    API_ACCEPTED_STATUSES,
+    allowed_target_labels,
+    build_api_llm_prompt,
+    export_case_payload,
+    import_llm_output_text,
+    parse_target_string,
+    require_api_pathway,
+    set_api_review_status,
+    target_label,
+    target_lookup_by_code,
+    update_api_mapping_target,
+)
 from app.candidates import add_manual_candidates, approve_candidate_review, search_acgme_targets
 from app.export_payload import export_approved_json
 from app.importer import import_mpower_csv
@@ -45,7 +58,7 @@ DEFAULT_MPOWER_CSV_PATH = "data/exports/mpower-download-260526-clean.csv"
 def _new_import_job(path: str) -> dict[str, Any]:
     return {
         "path": path,
-        "use_llm": True,
+        "mapping_pathway": "ollama",
         "llm_timeout_seconds": 30.0,
         "running": True,
         "import_id": None,
@@ -80,14 +93,14 @@ def _run_background_import(job: dict[str, Any]) -> None:
     conn = connect(DEFAULT_DB_PATH)
     try:
         init_db(conn)
-        use_llm = bool(job.get("use_llm", True))
+        mapping_pathway = str(job.get("mapping_pathway") or "ollama")
         llm_timeout_seconds = float(job.get("llm_timeout_seconds") or 30.0)
         summary = import_mpower_csv(
             conn,
             job["path"],
             progress_callback=on_progress,
             commit_per_row=True,
-            mapping_mode="llm" if use_llm else "legacy",
+            mapping_mode=mapping_pathway,
             llm_timeout_seconds=llm_timeout_seconds,
         )
         conn.commit()
@@ -99,9 +112,9 @@ def _run_background_import(job: dict[str, Any]) -> None:
         conn.close()
 
 
-def start_background_import(path: str, use_llm: bool = True, llm_timeout_seconds: float = 30.0) -> dict[str, Any]:
+def start_background_import(path: str, mapping_pathway: str = "ollama", llm_timeout_seconds: float = 30.0) -> dict[str, Any]:
     job = _new_import_job(path)
-    job["use_llm"] = use_llm
+    job["mapping_pathway"] = mapping_pathway
     job["llm_timeout_seconds"] = llm_timeout_seconds
     thread = threading.Thread(target=_run_background_import, args=(job,), daemon=True)
     job["thread"] = thread
@@ -169,7 +182,7 @@ def load_entries(conn: sqlite3.Connection, filter_name: str) -> pd.DataFrame:
     where = {
         "New / needs review": "review_status IN ('new_high_confidence', 'needs_review')",
         "Batch approvable": "review_status = 'new_high_confidence' AND mapping_confidence = 'high' AND role_confidence = 'high' AND compound_flag = 0",
-        "Approved not uploaded": "review_status IN ('approved', 'edited') AND upload_status IN ('not_uploaded', 'reset')",
+        "Approved not uploaded": "review_status IN ('approved', 'edited', 'accepted_auto', 'accepted_manual', 'edited_manual') AND upload_status IN ('not_uploaded', 'reset')",
         "Autofilled not submitted": "upload_status = 'autofilled'",
         "Upload failures": "upload_status = 'failed'",
         "Submitted": "upload_status = 'submitted'",
@@ -1144,6 +1157,159 @@ def load_unmapped(conn: sqlite3.Connection, import_id: int | None = None) -> pd.
     return add_parsed_report_preview(df)
 
 
+def normalize_pathway(value: str | None) -> str:
+    value = (value or "ollama").strip().lower()
+    return {"legacy": "fuzzy", "llm": "ollama"}.get(value, value if value in {"fuzzy", "ollama", "api"} else "ollama")
+
+
+def lock_pathway_from_state(conn: sqlite3.Connection) -> str:
+    if "mapping_pathway_lock" in st.session_state:
+        return normalize_pathway(st.session_state["mapping_pathway_lock"])
+    latest = latest_import(conn)
+    pathway = normalize_pathway(latest["mapping_pathway"] if latest and "mapping_pathway" in latest.keys() else "ollama")
+    st.session_state["mapping_pathway_lock"] = pathway
+    return pathway
+
+
+def api_llm_review_frame(conn: sqlite3.Connection, threshold: int, import_id: int | None = None) -> pd.DataFrame:
+    scope = """
+      AND EXISTS (
+        SELECT 1 FROM import_source_cases isc
+        WHERE isc.source_case_id = ge.source_case_id AND isc.import_id = ?
+      )
+    """ if import_id is not None else ""
+    df = pd.read_sql_query(
+        f"""
+        SELECT ge.id, ge.source_case_id, ge.component_label, ge.case_id AS local_case_id,
+               sc.llm_case_id, ge.case_date, sc.accession_number, sc.study_description,
+               sc.procedure_text, sc.parsed_report_json, ge.evidence_excerpt AS phrase,
+               ge.acgme_code, ge.area, ge.type, ge.acgme_description, ge.mapping_confidence,
+               ge.review_status, ge.comments, ge.llm_raw_response_json
+        FROM generated_entries ge
+        JOIN source_cases sc ON sc.id = ge.source_case_id
+        WHERE ge.mapping_pathway = 'api'
+          AND ge.review_status IN ('pending_review', 'error')
+          AND ge.upload_status IN ('not_uploaded', 'reset')
+          {scope}
+        ORDER BY CAST(ge.mapping_confidence AS INTEGER) DESC, ge.id
+        """,
+        conn,
+        params=(import_id,) if import_id is not None else (),
+    )
+    if df.empty:
+        return df
+    parsed_values = df["parsed_report_json"].map(parse_report_json)
+    df["impression"] = parsed_values.map(lambda p: compact_lines(p.get("impression"), 4))
+    confidence = pd.to_numeric(df["mapping_confidence"], errors="coerce").fillna(-1).astype(int)
+    df["confidence"] = confidence
+    df["queue"] = "Low confidence"
+    df.loc[(confidence >= threshold) & (df["review_status"] != "error") & (df["type"] != "ERROR"), "queue"] = "High confidence"
+    df.loc[(df["review_status"] == "error") | (df["type"] == "ERROR"), "queue"] = "Error"
+    return df.drop(columns=["parsed_report_json"])
+
+
+def render_api_llm_review(conn: sqlite3.Connection, threshold: int, import_id: int | None) -> None:
+    df = api_llm_review_frame(conn, threshold, import_id)
+    if df.empty:
+        st.info("No imported API LLM mappings are pending review.")
+        return
+
+    high = df[df["queue"] == "High confidence"]
+    low = df[df["queue"] == "Low confidence"]
+    errors = df[df["queue"] == "Error"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("High confidence", len(high))
+    c2.metric("Low confidence", len(low))
+    c3.metric("Error", len(errors))
+
+    if not high.empty:
+        st.subheader("High-confidence queue")
+        high_options = {
+            int(row.id): f"{row.case_date} | {row.llm_case_id} | {row.acgme_description or row.type} | {row.confidence}"
+            for row in high.itertuples()
+        }
+        selected = st.multiselect(
+            "Select mappings to batch accept",
+            list(high_options),
+            default=list(high_options),
+            format_func=lambda entry_id: high_options[int(entry_id)],
+        )
+        st.dataframe(
+            high[["id", "case_date", "accession_number", "impression", "phrase", "acgme_code", "acgme_description", "confidence", "review_status"]],
+            width="stretch",
+            hide_index=True,
+        )
+        if st.button("Batch accept selected API mappings", type="primary", disabled=not selected):
+            set_api_review_status(conn, [int(item) for item in selected], "accepted_auto")
+            conn.commit()
+            st.success(f"Accepted {len(selected)} API mappings.")
+            st.rerun()
+
+    if not low.empty or not errors.empty:
+        st.subheader("Manual correction queue")
+        manual_df = pd.concat([low, errors], ignore_index=True)
+        st.dataframe(
+            manual_df[["id", "queue", "case_date", "accession_number", "impression", "phrase", "acgme_code", "acgme_description", "confidence", "comments"]],
+            width="stretch",
+            hide_index=True,
+        )
+        entry_ids = manual_df["id"].astype(int).tolist()
+        selected_entry = st.selectbox("Mapping to edit", entry_ids, format_func=lambda entry_id: f"Entry {entry_id}")
+        current = manual_df[manual_df["id"].astype(int) == int(selected_entry)].iloc[0].to_dict()
+        st.caption(f"Phrase: {current.get('phrase') or ''}")
+        target_labels = allowed_target_labels()
+        default_label = ""
+        if current.get("acgme_code"):
+            parsed = parse_target_string(f"{current['acgme_code']} | {current.get('acgme_description') or current.get('type')}")
+            if parsed.target:
+                default_label = target_label(parsed.target)
+        options = [""] + target_labels
+        selected_target = st.selectbox(
+            "Manual target",
+            options,
+            index=options.index(default_label) if default_label in options else 0,
+        )
+        action_col, reject_col = st.columns(2)
+        with action_col:
+            if st.button("Approve corrected mapping", type="primary", disabled=not selected_target):
+                parsed = parse_target_string(selected_target)
+                if not parsed.target:
+                    st.error(parsed.error or "Invalid target.")
+                else:
+                    update_api_mapping_target(conn, int(selected_entry), parsed.target, "edited_manual")
+                    conn.commit()
+                    st.success("Approved corrected mapping.")
+                    st.rerun()
+        with reject_col:
+            if st.button("Reject mapping"):
+                set_api_review_status(conn, [int(selected_entry)], "rejected")
+                conn.commit()
+                st.success("Rejected mapping.")
+                st.rerun()
+
+
+def accepted_api_count(conn: sqlite3.Connection, import_id: int | None = None) -> int:
+    scope = """
+      AND EXISTS (
+        SELECT 1 FROM import_source_cases isc
+        WHERE isc.source_case_id = generated_entries.source_case_id AND isc.import_id = ?
+      )
+    """ if import_id is not None else ""
+    return int(
+        conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM generated_entries
+            WHERE mapping_pathway = 'api'
+              AND review_status IN ({",".join("?" for _ in API_ACCEPTED_STATUSES)})
+              AND upload_status IN ('not_uploaded', 'reset')
+              {scope}
+            """,
+            (*API_ACCEPTED_STATUSES, *((import_id,) if import_id is not None else ())),
+        ).fetchone()[0]
+    )
+
+
 st.set_page_config(page_title="ACGME IR Case Logs", layout="wide")
 install_review_css()
 maybe_scroll_to_top()
@@ -1151,13 +1317,40 @@ st.title("ACGME IR Case Log Review")
 st.caption(f"Learned mapping correction rules: {learned_rule_count()}")
 
 conn = get_conn()
+pathway_lock = lock_pathway_from_state(conn)
 
 with st.sidebar:
+    st.header("Mapping pathway")
+    pathway_labels = {
+        "fuzzy": "Fuzzy match",
+        "ollama": "Local Ollama",
+        "api": "Out-of-band API LLM",
+    }
+    selected_pathway = st.radio(
+        "Pathway",
+        ["fuzzy", "ollama", "api"],
+        index=["fuzzy", "ollama", "api"].index(pathway_lock),
+        format_func=lambda value: pathway_labels[str(value)],
+        horizontal=False,
+    )
+    selected_pathway = normalize_pathway(str(selected_pathway))
+    if selected_pathway != pathway_lock:
+        latest_for_lock = latest_import(conn)
+        if latest_for_lock:
+            st.error(f"This SQLite session is locked to {pathway_labels[pathway_lock]}. Start a fresh database/session to switch pathways.")
+            selected_pathway = pathway_lock
+        else:
+            st.session_state["mapping_pathway_lock"] = selected_pathway
+            pathway_lock = selected_pathway
+            st.rerun()
+
     st.header("Local LLM")
     health = llm_health()
     st.caption(f"Model: {health['model']}")
     st.caption(f"Ollama: {health['base_url']} · ctx {health['num_ctx']}")
-    if health["reachable"] and health["model_available"]:
+    if pathway_lock != "ollama":
+        st.caption("Ollama status is only used by the Local Ollama pathway.")
+    elif health["reachable"] and health["model_available"]:
         st.success("LLM reachable")
     elif health["reachable"]:
         st.warning("Ollama reachable; configured model not installed")
@@ -1167,14 +1360,13 @@ with st.sidebar:
     st.header("Import")
     import_path = st.text_input("Default mPower CSV", DEFAULT_MPOWER_CSV_PATH)
     uploaded = st.file_uploader("Optional alternate import file", type=["csv"])
-    use_llm_for_import = st.toggle("Use local LLM for import mapping", value=True)
     llm_timeout_seconds = st.number_input(
         "LLM timeout per case (seconds)",
         min_value=5,
         max_value=600,
         value=int(float(health.get("timeout_seconds") or 30)),
         step=5,
-        disabled=not use_llm_for_import,
+        disabled=pathway_lock != "ollama",
     )
     current_import = import_job_snapshot(st.session_state.get("import_job"))
     import_running = bool(current_import and current_import["running"])
@@ -1189,7 +1381,7 @@ with st.sidebar:
             path = import_path
         st.session_state["import_job"] = start_background_import(
             str(path),
-            use_llm=use_llm_for_import,
+            mapping_pathway=pathway_lock,
             llm_timeout_seconds=float(llm_timeout_seconds),
         )
         st.rerun()
@@ -1250,6 +1442,52 @@ with st.sidebar:
             )
         )
 
+    if pathway_lock == "api":
+        st.header("API LLM")
+        api_payload = export_case_payload(conn, active_import_id)
+        st.caption(f"{len(api_payload)} de-identified cases ready for out-of-band LLM mapping.")
+        st.download_button(
+            "Download LLM payload JSON",
+            data=json.dumps(api_payload, indent=2),
+            file_name="api_llm_payload.json",
+            mime="application/json",
+            disabled=not api_payload,
+        )
+        st.download_button(
+            "Download LLM prompt",
+            data=build_api_llm_prompt(api_payload),
+            file_name="api_llm_prompt.txt",
+            mime="text/plain",
+            disabled=not api_payload,
+        )
+        api_json_file = st.file_uploader("Upload API LLM output JSON", type=["json"], key="api_llm_json_file")
+        api_json_text = st.text_area("Or paste API LLM output JSON", height=120, key="api_llm_json_text")
+        if st.button("Import API LLM JSON"):
+            try:
+                require_api_pathway(conn, pathway_lock)
+            except Exception as exc:
+                st.error(f"Hard reject: {exc}")
+            else:
+                content = ""
+                if api_json_file:
+                    content = api_json_file.getvalue().decode("utf-8")
+                elif api_json_text.strip():
+                    content = api_json_text.strip()
+                if not content:
+                    st.error("Upload a JSON file or paste JSON output first.")
+                else:
+                    inserted, _valid, invalid = import_llm_output_text(conn, content)
+                    conn.commit()
+                    if invalid:
+                        st.error(f"Imported {inserted} valid mappings; rejected {len(invalid)} invalid mappings.")
+                        st.dataframe(pd.DataFrame(invalid), width="stretch", hide_index=True)
+                    else:
+                        st.success(f"Imported {inserted} API LLM mappings.")
+                    st.rerun()
+    else:
+        st.header("API LLM")
+        st.caption("API JSON import is disabled because this SQLite session is locked to another pathway.")
+
     if import_running:
         @st.fragment(run_every="3s")
         def auto_refresh_import() -> None:
@@ -1288,7 +1526,7 @@ with st.sidebar:
         )
         st.rerun()
 
-tab_review, tab_diagnostics, tab_imports = st.tabs(["Review Queue", "Diagnostics", "Imports"])
+tab_review, tab_api_llm, tab_diagnostics, tab_imports = st.tabs(["Review Queue", "API LLM", "Diagnostics", "Imports"])
 
 with tab_review:
     counts = review_counts(conn, active_import_id)
@@ -1414,6 +1652,14 @@ with tab_review:
                 lambda: failed_upload_review_card(conn, source, entries),
                 status="Failed upload",
             )
+
+with tab_api_llm:
+    if pathway_lock != "api":
+        st.info("API LLM review is unavailable because this SQLite session is locked to another pathway.")
+    else:
+        threshold = st.slider("Confidence threshold", min_value=0, max_value=100, value=85, step=1)
+        st.caption(f"Accepted API mappings ready for Chrome extension: {accepted_api_count(conn, active_import_id)}")
+        render_api_llm_review(conn, threshold, active_import_id)
 
 with tab_diagnostics:
     filter_name = st.selectbox(

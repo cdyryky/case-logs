@@ -7,15 +7,18 @@ from pathlib import Path
 from .constants import EXPORTS_DIR
 from .upload_queue import payload_from_entry
 
+EXPORTABLE_REVIEW = ("approved", "edited", "accepted_auto", "accepted_manual", "edited_manual")
+
 
 def approved_entries(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
-        """
+        f"""
         SELECT * FROM generated_entries
-        WHERE review_status IN ('approved', 'edited')
+        WHERE review_status IN ({",".join("?" for _ in EXPORTABLE_REVIEW)})
           AND upload_status IN ('not_uploaded', 'reset', 'failed')
         ORDER BY id
-        """
+        """,
+        EXPORTABLE_REVIEW,
     ).fetchall()
     return [payload_from_entry(row) for row in rows]
 

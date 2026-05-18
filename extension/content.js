@@ -880,9 +880,16 @@ async function submitPage() {
   if (button.disabled || button.getAttribute("aria-disabled") === "true") {
     throw new Error("ACGME submit button is disabled.");
   }
+  const beforeUrl = location.href;
   showToast("Submitting ACGME case...");
   clickLikeUser(button);
   await nextFrame();
+  await waitUntil(() => (
+    button.disabled ||
+    button.getAttribute("aria-disabled") === "true" ||
+    location.href !== beforeUrl ||
+    !document.body.contains(button)
+  ), 2500, 80);
 }
 
 async function handleMessage(message) {
