@@ -7,6 +7,9 @@ cd "$ROOT_DIR"
 MODE="${1:-all}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_PY="$ROOT_DIR/.venv/bin/python"
+OLLAMA_BASE_URL="${ACGME_LLM_BASE_URL:-http://127.0.0.1:11434}"
+OLLAMA_MODEL="${ACGME_LLM_MODEL:-gemma4:latest}"
+ollama_pid=""
 
 usage() {
   cat <<EOF
@@ -41,6 +44,49 @@ echo "Installing/updating Python dependencies..."
 echo "Initializing local database..."
 "$VENV_PY" -m app.cli init-db >/dev/null
 
+ollama_ready() {
+  curl -fsS "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1
+}
+
+ensure_ollama() {
+  if [ "${ACGME_MAPPING_MODE:-llm}" = "legacy" ]; then
+    echo "Local LLM mapping disabled by ACGME_MAPPING_MODE=legacy."
+    return
+  fi
+
+  echo "Local LLM mapping model: $OLLAMA_MODEL"
+  if ollama_ready; then
+    echo "Ollama is already running at $OLLAMA_BASE_URL."
+  else
+    if ! command -v ollama >/dev/null 2>&1; then
+      echo "Ollama is not installed; imports will use legacy fallback if LLM mapping fails."
+      return
+    fi
+    echo "Starting Ollama at $OLLAMA_BASE_URL..."
+    ollama serve > "$ROOT_DIR/data/ollama.log" 2>&1 &
+    ollama_pid="$!"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if ollama_ready; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+
+  if ! ollama_ready; then
+    echo "Ollama did not become ready; imports will use legacy fallback if LLM mapping fails."
+    return
+  fi
+
+  if command -v ollama >/dev/null 2>&1 && ollama list 2>/dev/null | awk 'NR > 1 {print $1}' | grep -qx "$OLLAMA_MODEL"; then
+    echo "Ollama model is available: $OLLAMA_MODEL"
+  else
+    echo "Ollama is running, but model '$OLLAMA_MODEL' was not found. Install it or set ACGME_LLM_MODEL."
+  fi
+}
+
+ensure_ollama
+
 start_api() {
   echo "Starting API at http://127.0.0.1:8765"
   "$VENV_PY" -m uvicorn app.api:api --host 127.0.0.1 --port 8765
@@ -61,6 +107,9 @@ else
   cleanup() {
     if [ -n "$api_pid" ] && kill -0 "$api_pid" 2>/dev/null; then
       kill "$api_pid" 2>/dev/null || true
+    fi
+    if [ -n "$ollama_pid" ] && kill -0 "$ollama_pid" 2>/dev/null; then
+      kill "$ollama_pid" 2>/dev/null || true
     fi
   }
   trap cleanup EXIT INT TERM

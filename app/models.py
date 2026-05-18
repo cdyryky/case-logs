@@ -20,8 +20,12 @@ def ensure_dirs() -> None:
 
 def connect(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     ensure_dirs()
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
+    if str(db_path) != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -186,6 +190,22 @@ def init_db(conn: sqlite3.Connection) -> None:
           generated_entries_count INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS import_source_cases (
+          id INTEGER PRIMARY KEY,
+          import_id INTEGER NOT NULL,
+          source_case_id INTEGER NOT NULL,
+          source_row_number INTEGER,
+          accession_number TEXT,
+          inserted_source_case INTEGER NOT NULL DEFAULT 0,
+          generated_entries_count INTEGER NOT NULL DEFAULT 0,
+          mapped_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(import_id, source_row_number, source_case_id),
+          FOREIGN KEY(import_id) REFERENCES imports(id),
+          FOREIGN KEY(source_case_id) REFERENCES source_cases(id)
+        );
+
         CREATE TABLE IF NOT EXISTS generated_entries (
           id INTEGER PRIMARY KEY,
           source_case_id INTEGER NOT NULL,
@@ -225,6 +245,9 @@ def init_db(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_generated_review_upload
           ON generated_entries(review_status, upload_status);
+
+        CREATE INDEX IF NOT EXISTS idx_import_source_cases_import
+          ON import_source_cases(import_id, source_case_id);
 
         CREATE TABLE IF NOT EXISTS baseline_submissions (
           id INTEGER PRIMARY KEY,
@@ -344,6 +367,26 @@ def init_db(conn: sqlite3.Connection) -> None:
           ON mapping_learning_signals(exam_code, area, type);
         """
     )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO import_source_cases(
+          import_id, source_case_id, source_row_number, accession_number, inserted_source_case,
+          generated_entries_count, mapped_at, created_at, updated_at
+        )
+        SELECT
+          sc.import_id,
+          sc.id,
+          sc.source_row_number,
+          sc.accession_number,
+          1,
+          (SELECT COUNT(*) FROM generated_entries ge WHERE ge.source_case_id = sc.id),
+          sc.imported_at,
+          sc.imported_at,
+          sc.imported_at
+        FROM source_cases sc
+        WHERE sc.import_id IS NOT NULL
+        """
+    )
     ensure_columns(
         conn,
         "source_match_candidates",
@@ -360,8 +403,13 @@ def init_db(conn: sqlite3.Connection) -> None:
             "acgme_code": "TEXT",
             "acgme_description": "TEXT",
             "acgme_def_category": "TEXT",
+            "evidence_excerpt": "TEXT",
+            "llm_model": "TEXT",
+            "llm_prompt_version": "TEXT",
+            "llm_raw_response_json": "TEXT",
         },
     )
+    conn.commit()
 
 
 def log_event(

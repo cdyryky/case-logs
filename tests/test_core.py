@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 from pathlib import Path
 from datetime import datetime
 
@@ -20,11 +23,13 @@ from app.candidates import (
 )
 from app.learning import append_learned_rule
 from app.importer import import_mpower_csv, insert_generated_entries, insert_source_case
+from app.llm_client import LLMClientError, LLMSettings, OllamaClient
+from app.llm_mapping import LLM_OUTPUT_SCHEMA, build_prompt, llm_entries_for_source
 from app.matching import match_tokens
 from app.mapper import load_mapping_rules, map_source_case
 from app.models import init_db
 from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row
-from app.review_queue import best_report_context_for_source, load_next_candidate_group, remap_unresolved_cases
+from app.review_queue import best_report_context_for_source, load_next_candidate_group, remap_unresolved_cases, review_counts
 from app.upload_queue import (
     claim_next,
     claim_next_group,
@@ -55,7 +60,55 @@ def transform_report_fixture(raw: dict[str, object]) -> dict[str, object]:
     )
 
 
+class FakeLLMClient:
+    def __init__(self, responses: list[dict[str, object]] | None = None, error: Exception | None = None) -> None:
+        self.responses = list(responses or [])
+        self.error = error
+        self.calls: list[tuple[str, dict[str, object]]] = []
+        self.settings = SimpleNamespace(model="gemma4:latest")
+
+    def generate_json(self, prompt: str, schema: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
+        self.calls.append((prompt, schema))
+        if self.error:
+            raise self.error
+        if not self.responses:
+            raise AssertionError("FakeLLMClient received more calls than expected")
+        payload = self.responses.pop(0)
+        return payload, {"response": json.dumps(payload)}
+
+
 class CoreTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._old_mapping_mode = os.environ.get("ACGME_MAPPING_MODE")
+        os.environ["ACGME_MAPPING_MODE"] = "legacy"
+
+    def tearDown(self) -> None:
+        if self._old_mapping_mode is None:
+            os.environ.pop("ACGME_MAPPING_MODE", None)
+        else:
+            os.environ["ACGME_MAPPING_MODE"] = self._old_mapping_mode
+
+    def test_init_db_commits_bootstrap_transaction(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "case_logs.sqlite"
+            conn = sqlite3.connect(db_path, timeout=0.1)
+            conn.row_factory = sqlite3.Row
+            init_db(conn)
+            self.assertFalse(conn.in_transaction)
+
+            other = sqlite3.connect(db_path, timeout=0.1)
+            try:
+                other.execute(
+                    """
+                    INSERT INTO entry_events(entry_id, event_type, timestamp, source)
+                    VALUES (NULL, 'smoke', '2026-01-01T00:00:00+00:00', 'test')
+                    """
+                )
+                other.commit()
+            finally:
+                other.close()
+                conn.close()
+
     def test_case_year_boundaries(self) -> None:
         self.assertEqual(case_year_from_date("2025-07-01T00:00:00-07:00", 2026), 5)
         self.assertEqual(case_year_from_date("2025-06-30T00:00:00-07:00", 2026), 4)
@@ -394,6 +447,348 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(nephroureteral.acgme_def_category, "Catheter exchange")
         stricture = by_description["GU stricture dilation"]
         self.assertEqual(stricture.acgme_code, "31840")
+
+    def test_llm_schema_prompt_and_client_context_settings(self) -> None:
+        source = transform_mpower_row(
+            {
+                "Accession Number": "202601050001",
+                "Modality": "IR",
+                "Exam Code": "USGUDPARAC",
+                "Exam Description": "US GUIDED PARACENTESIS",
+                "CPT Code": "",
+                "Report Text": (
+                    "PROCEDURE: Ultrasound-guided paracentesis\n\n"
+                    "IMPRESSION:\n"
+                    "Successful paracentesis.\n\n"
+                    "TECHNIQUE:\n"
+                    "Technique details should not be sent.\n"
+                ),
+                "Patient Age": "42",
+                "Exam Started Date": "2026-01-05 10:00:00-08:00",
+                "Report Finalized By": "Attending, Example",
+            }
+        )
+        prompt = build_prompt(source)
+        self.assertNotIn("procedure_label", json.dumps(LLM_OUTPUT_SCHEMA))
+        self.assertNotIn("procedure_label", prompt)
+        self.assertIn("Successful paracentesis", prompt)
+        self.assertNotIn("Technique details should not be sent", prompt)
+
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {"response": json.dumps({"procedures": [], "warnings": []})}
+
+        def fake_post(url: str, json: dict[str, object], timeout: float) -> FakeResponse:
+            captured["url"] = url
+            captured["json"] = json
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        client = OllamaClient(LLMSettings(base_url="http://127.0.0.1:11434", model="gemma4:latest", timeout_seconds=3, num_ctx=8192))
+        with patch("app.llm_client.httpx.post", fake_post):
+            client.generate_json("prompt", LLM_OUTPUT_SCHEMA)
+        payload = captured["json"]
+        self.assertEqual(payload["model"], "gemma4:latest")
+        self.assertGreaterEqual(payload["options"]["num_ctx"], 8192)
+
+    def test_llm_extraction_validates_codes_and_retries_invalid_response(self) -> None:
+        source = transform_mpower_row(
+            {
+                "Accession Number": "202601060001",
+                "Modality": "US",
+                "Exam Code": "USGUDPARAC",
+                "Exam Description": "US GUIDED PARACENTESIS",
+                "CPT Code": "49083",
+                "Report Text": (
+                    "PROCEDURE: Ultrasound-guided paracentesis\n\n"
+                    "IMPRESSION:\n"
+                    "Successful ultrasound-guided paracentesis.\n"
+                ),
+                "Patient Age": "42",
+                "Exam Started Date": "2026-01-06 10:00:00-08:00",
+                "Report Finalized By": "Attending, Example",
+            }
+        )
+        os.environ["ACGME_MAPPING_MODE"] = "llm"
+        client = FakeLLMClient(
+            [
+                {
+                    "procedures": [
+                        {
+                            "acgme_code": "99999",
+                            "evidence_excerpt": "Successful ultrasound-guided paracentesis.",
+                            "confidence": "high",
+                            "rationale": "Invalid code.",
+                        }
+                    ],
+                    "warnings": [],
+                },
+                {
+                    "procedures": [
+                        {
+                            "acgme_code": "31896",
+                            "evidence_excerpt": "Successful ultrasound-guided paracentesis.",
+                            "confidence": "high",
+                            "rationale": "Paracentesis performed.",
+                        }
+                    ],
+                    "warnings": [],
+                },
+            ]
+        )
+        extraction = llm_entries_for_source(source, client=client)
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(len(extraction.entries), 1)
+        self.assertEqual(extraction.entries[0]["acgme_code"], "31896")
+        self.assertEqual(extraction.entries[0]["review_status"], "needs_review")
+        self.assertEqual(extraction.entries[0]["area"], "Drainage Procedures")
+
+    def test_import_mpower_csv_uses_llm_for_compound_case_and_reports_progress(self) -> None:
+        os.environ["ACGME_MAPPING_MODE"] = "llm"
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        row = {
+            "Accession Number": "202601070001",
+            "Modality": "IR",
+            "Exam Code": "IRIVCFIL",
+            "Exam Description": "IR IVC FILTER PLACEMENT",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURES:\n"
+                "1. Inferior vena cava filter insertion\n"
+                "2. Renal transarterial embolization\n\n"
+                "IMPRESSION:\n"
+                "1. Insertion of inferior vena cava filter.\n"
+                "2. Right renal angiography with embolization.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-07 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mpower.csv"
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+            events: list[dict[str, object]] = []
+            summary = import_mpower_csv(
+                conn,
+                path,
+                progress_callback=events.append,
+                llm_client=FakeLLMClient(
+                    [
+                        {
+                            "procedures": [
+                                {
+                                    "acgme_code": "31740",
+                                    "evidence_excerpt": "Insertion of inferior vena cava filter.",
+                                    "confidence": "high",
+                                    "rationale": "IVC filter placement performed.",
+                                },
+                                {
+                                    "acgme_code": "31682",
+                                    "evidence_excerpt": "Right renal angiography with embolization.",
+                                    "confidence": "medium",
+                                    "rationale": "Arterial embolization performed.",
+                                },
+                            ],
+                            "warnings": ["compound case"],
+                        }
+                    ]
+                ),
+            )
+        self.assertEqual(summary["generated_entries_count"], 2)
+        rows = conn.execute("SELECT acgme_code, review_status, compound_flag, evidence_excerpt, llm_model FROM generated_entries ORDER BY id").fetchall()
+        self.assertEqual([row["acgme_code"] for row in rows], ["31740", "31682"])
+        self.assertEqual({row["review_status"] for row in rows}, {"needs_review"})
+        self.assertEqual({row["compound_flag"] for row in rows}, {1})
+        self.assertTrue(all(row["evidence_excerpt"] for row in rows))
+        self.assertEqual({row["llm_model"] for row in rows}, {"gemma4:latest"})
+        source_status = conn.execute("SELECT source_mapping_status, needs_review_reason FROM source_cases").fetchone()
+        self.assertEqual(source_status["source_mapping_status"], "generated_llm")
+        self.assertIn("compound case", source_status["needs_review_reason"])
+        self.assertTrue(any(event["phase"] == "Mapping with local LLM" for event in events))
+
+    def test_import_mpower_csv_commit_per_row_makes_entries_visible_during_import(self) -> None:
+        os.environ["ACGME_MAPPING_MODE"] = "llm"
+        rows = [
+            {
+                "Accession Number": "202601070010",
+                "Modality": "US",
+                "Exam Code": "USGUDPARAC",
+                "Exam Description": "US GUIDED PARACENTESIS",
+                "CPT Code": "49083",
+                "Report Text": "PROCEDURE: Paracentesis\n\nIMPRESSION:\nSuccessful paracentesis.\n",
+                "Patient Age": "42",
+                "Exam Started Date": "2026-01-07 10:00:00-08:00",
+                "Report Finalized By": "Attending, Example",
+            },
+            {
+                "Accession Number": "202601070011",
+                "Modality": "IR",
+                "Exam Code": "IRIVCFIL",
+                "Exam Description": "IR IVC FILTER PLACEMENT",
+                "CPT Code": "",
+                "Report Text": "PROCEDURE: IVC filter placement\n\nIMPRESSION:\nSuccessful IVC filter placement.\n",
+                "Patient Age": "42",
+                "Exam Started Date": "2026-01-07 11:00:00-08:00",
+                "Report Finalized By": "Attending, Example",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "case_logs.sqlite"
+            csv_path = Path(tmp) / "mpower.csv"
+            with csv_path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout = 30000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            init_db(conn)
+            visible_after_first_commit: list[int] = []
+            source_visible_before_mapping: list[int] = []
+
+            def on_progress(event: dict[str, object]) -> None:
+                if event.get("phase") == "Queued for mapping" and event.get("row") == 1:
+                    other = sqlite3.connect(db_path, timeout=30)
+                    try:
+                        other.execute("PRAGMA busy_timeout = 30000")
+                        source_visible_before_mapping.append(other.execute("SELECT COUNT(*) FROM source_cases").fetchone()[0])
+                    finally:
+                        other.close()
+                if event.get("phase") == "Committed row" and event.get("row") == 1:
+                    other = sqlite3.connect(db_path, timeout=30)
+                    try:
+                        other.execute("PRAGMA busy_timeout = 30000")
+                        visible_after_first_commit.append(other.execute("SELECT COUNT(*) FROM generated_entries").fetchone()[0])
+                    finally:
+                        other.close()
+
+            import_mpower_csv(
+                conn,
+                csv_path,
+                progress_callback=on_progress,
+                commit_per_row=True,
+                llm_client=FakeLLMClient(
+                    [
+                        {
+                            "procedures": [
+                                {
+                                    "acgme_code": "31896",
+                                    "evidence_excerpt": "Successful paracentesis.",
+                                    "confidence": "high",
+                                    "rationale": "Paracentesis performed.",
+                                }
+                            ],
+                            "warnings": [],
+                        },
+                        {
+                            "procedures": [
+                                {
+                                    "acgme_code": "31740",
+                                    "evidence_excerpt": "Successful IVC filter placement.",
+                                    "confidence": "high",
+                                    "rationale": "IVC filter placement performed.",
+                                }
+                            ],
+                            "warnings": [],
+                        },
+                    ]
+                ),
+            )
+            conn.close()
+        self.assertEqual(source_visible_before_mapping, [1])
+        self.assertEqual(visible_after_first_commit, [1])
+
+    def test_import_mpower_csv_falls_back_when_llm_unavailable(self) -> None:
+        os.environ["ACGME_MAPPING_MODE"] = "llm"
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        row = {
+            "Accession Number": "202601080001",
+            "Modality": "IR",
+            "Exam Code": "IRFLUROCASCACCESS",
+            "Exam Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Venous port placement\n\n"
+                "Procedural Personnel\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful venous port placement.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-08 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mpower.csv"
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+            summary = import_mpower_csv(
+                conn,
+                path,
+                llm_client=FakeLLMClient(error=LLMClientError("connection refused")),
+            )
+        self.assertEqual(summary["generated_entries_count"], 1)
+        source_status = conn.execute("SELECT source_mapping_status, needs_review_reason FROM source_cases").fetchone()
+        self.assertEqual(source_status["source_mapping_status"], "llm_failed_fallback_generated")
+        self.assertIn("LLM failed; legacy fallback used", source_status["needs_review_reason"])
+        row = conn.execute("SELECT type FROM generated_entries").fetchone()
+        self.assertEqual(row["type"], "Venous port placement")
+
+    def test_import_mpower_csv_can_skip_llm_for_single_import(self) -> None:
+        os.environ["ACGME_MAPPING_MODE"] = "llm"
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        row = {
+            "Accession Number": "202601080002",
+            "Modality": "IR",
+            "Exam Code": "IRFLUROCASCACCESS",
+            "Exam Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Venous port placement\n\n"
+                "Procedural Personnel\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful venous port placement.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-08 11:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mpower.csv"
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+            events: list[dict[str, object]] = []
+            summary = import_mpower_csv(
+                conn,
+                path,
+                progress_callback=events.append,
+                llm_client=FakeLLMClient(error=LLMClientError("should not call llm")),
+                mapping_mode="legacy",
+            )
+        self.assertEqual(summary["generated_entries_count"], 1)
+        self.assertTrue(any(event["phase"] == "Mapping with legacy rules" for event in events))
+        source_status = conn.execute("SELECT source_mapping_status, needs_review_reason FROM source_cases").fetchone()
+        self.assertNotIn("LLM failed", source_status["needs_review_reason"] or "")
 
     def test_candidate_generation_uses_parsed_multi_procedure_evidence(self) -> None:
         raw = {
@@ -856,6 +1251,92 @@ class CoreTests(unittest.TestCase):
             reopened.close()
         self.assertEqual(stored["source_format"], "mpower_csv")
         self.assertEqual(json.loads(stored["parsed_report_json"])["procedure_title"], "Example procedure")
+
+    def test_duplicate_import_creates_scope_membership_and_can_review_existing_source(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        row = {
+            "Accession Number": "202601010003",
+            "Modality": "IR",
+            "Exam Code": "IRFLUROCASCACCESS",
+            "Exam Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
+            "CPT Code": "",
+            "Report Text": (
+                "PROCEDURE: Venous port placement\n\n"
+                "Procedural Personnel\n"
+                "Resident physician(s): Cody Key, MD\n\n"
+                "IMPRESSION:\n"
+                "Successful venous port placement.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-01 12:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mpower.csv"
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row))
+                writer.writeheader()
+                writer.writerow(row)
+            first = import_mpower_csv(conn, path)
+            second = import_mpower_csv(conn, path)
+        self.assertEqual(first["new_source_cases"], 1)
+        self.assertEqual(second["new_source_cases"], 0)
+        self.assertEqual(second["duplicate_source_cases"], 1)
+        memberships = conn.execute(
+            """
+            SELECT import_id, source_case_id, inserted_source_case, generated_entries_count
+            FROM import_source_cases
+            ORDER BY import_id
+            """
+        ).fetchall()
+        self.assertEqual(len(memberships), 2)
+        self.assertEqual(memberships[0]["source_case_id"], memberships[1]["source_case_id"])
+        self.assertEqual(memberships[1]["import_id"], second["import_id"])
+        self.assertEqual(memberships[1]["inserted_source_case"], 0)
+        self.assertEqual(review_counts(conn, second["import_id"])["needs_review"], 1)
+        source, _ = load_next_candidate_group(conn, second["import_id"])
+        self.assertEqual(source["id"], memberships[1]["source_case_id"])
+
+    def test_scoped_review_counts_exclude_prior_import_backlog(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        mapped_row = {
+            "Accession Number": "202601010004",
+            "Modality": "IR",
+            "Exam Code": "IRFLUROCASCACCESS",
+            "Exam Description": "IR FLUOROSCOPY GUIDED VASCULAR ACCESS DEVICE PLACEMENT",
+            "CPT Code": "",
+            "Report Text": "PROCEDURE: Venous port placement\n\nIMPRESSION:\nSuccessful venous port placement.\n",
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-01 13:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        unmapped_row = {
+            **mapped_row,
+            "Accession Number": "202601010005",
+            "Exam Code": "IRUNKNOWN",
+            "Exam Description": "IR UNKNOWN PROCEDURE",
+            "Report Text": "PROCEDURE: Unknown procedure\n\nIMPRESSION:\nUnknown procedure performed.\n",
+            "Exam Started Date": "2026-01-01 14:00:00-08:00",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            first_path = Path(tmp) / "first.csv"
+            second_path = Path(tmp) / "second.csv"
+            for path, row in [(first_path, mapped_row), (second_path, unmapped_row)]:
+                with path.open("w", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=list(row))
+                    writer.writeheader()
+                    writer.writerow(row)
+            first = import_mpower_csv(conn, first_path)
+            second = import_mpower_csv(conn, second_path)
+        self.assertGreater(review_counts(conn)["needs_review"], 0)
+        self.assertEqual(review_counts(conn, second["import_id"])["needs_review"], 0)
+        self.assertEqual(review_counts(conn, second["import_id"])["unmapped_total"], 1)
+        source, _ = load_next_candidate_group(conn, second["import_id"])
+        self.assertEqual(source["accession_number"], unmapped_row["Accession Number"])
 
     def test_port_removal_targets_exact_acgme_row(self) -> None:
         raw = {

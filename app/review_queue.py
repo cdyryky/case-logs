@@ -13,6 +13,43 @@ from .matching import suggest_mappings
 from .utils import case_year_from_date, format_acgme_date, patient_type, patient_type_from_age
 
 
+def latest_import(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM imports ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def import_scope_summary(conn: sqlite3.Connection, import_id: int | None) -> dict[str, Any]:
+    if import_id is None:
+        return {"import_id": None, "filename": "All backlog", "row_count": 0, "scoped_source_cases": 0, "mapped_source_cases": 0}
+    row = conn.execute("SELECT * FROM imports WHERE id = ?", (import_id,)).fetchone()
+    if not row:
+        return {"import_id": import_id, "filename": "", "row_count": 0, "scoped_source_cases": 0, "mapped_source_cases": 0}
+    scoped = conn.execute(
+        """
+        SELECT
+          COUNT(DISTINCT source_case_id) AS source_cases,
+          COUNT(DISTINCT CASE WHEN mapped_at IS NOT NULL THEN source_case_id END) AS mapped_cases
+        FROM import_source_cases
+        WHERE import_id = ?
+        """,
+        (import_id,),
+    ).fetchone()
+    return {
+        "import_id": import_id,
+        "filename": row["filename"],
+        "row_count": row["row_count"],
+        "new_source_cases": row["new_source_cases"],
+        "duplicate_source_cases": row["duplicate_source_cases"],
+        "generated_entries_count": row["generated_entries_count"],
+        "imported_at": row["imported_at"],
+        "scoped_source_cases": scoped["source_cases"] if scoped else 0,
+        "mapped_source_cases": scoped["mapped_cases"] if scoped else 0,
+    }
+
+
+def _scope_exists_sql(alias: str = "sc") -> str:
+    return f"EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = {alias}.id AND isc.import_id = ?)"
+
+
 def source_row_to_mapping_source(row: sqlite3.Row, profile: dict[str, Any] | None = None) -> dict[str, Any]:
     profile = profile or load_resident_profile()
     resident = profile["resident"]
@@ -129,55 +166,85 @@ def best_report_context_for_source(conn: sqlite3.Connection, row: sqlite3.Row) -
     return best
 
 
-def review_counts(conn: sqlite3.Connection) -> dict[str, int]:
+def review_counts(conn: sqlite3.Connection, import_id: int | None = None) -> dict[str, int]:
+    if import_id is None:
+        scope_params: tuple[Any, ...] = ()
+        generated_scope = ""
+        candidate_scope = ""
+        source_scope = ""
+    else:
+        scope_params = (import_id,)
+        generated_scope = "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = generated_entries.source_case_id AND isc.import_id = ?)"
+        candidate_scope = "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = source_match_candidates.source_case_id AND isc.import_id = ?)"
+        source_scope = "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = source_cases.id AND isc.import_id = ?)"
     return {
         "batch_approvable": conn.execute(
-            """
+            f"""
             SELECT COUNT(*) FROM generated_entries
             WHERE review_status = 'new_high_confidence'
               AND mapping_confidence = 'high'
               AND role_confidence = 'high'
               AND compound_flag = 0
               AND upload_status IN ('not_uploaded', 'reset')
-            """
+              {generated_scope}
+            """,
+            scope_params,
         ).fetchone()[0],
         "needs_review": conn.execute(
-            """
+            f"""
             SELECT COUNT(DISTINCT source_case_id)
             FROM (
               SELECT source_case_id
               FROM source_match_candidates
               WHERE user_status = 'pending'
+                {candidate_scope}
               UNION
               SELECT source_case_id
               FROM generated_entries
               WHERE review_status IN ('new_high_confidence', 'needs_review')
                 AND upload_status IN ('not_uploaded', 'reset')
+                {generated_scope}
             )
-            """
+            """,
+            scope_params * 2,
         ).fetchone()[0],
         "upload_failures": conn.execute(
-            "SELECT COUNT(*) FROM generated_entries WHERE upload_status = 'failed'"
+            f"""
+            SELECT COUNT(*) FROM generated_entries
+            WHERE upload_status = 'failed'
+              {generated_scope}
+            """,
+            scope_params,
         ).fetchone()[0],
         "unmapped_total": conn.execute(
-            "SELECT COUNT(*) FROM source_cases WHERE source_mapping_status IN ('unmapped', 'flag_only')"
+            f"""
+            SELECT COUNT(*) FROM source_cases
+            WHERE source_mapping_status IN ('unmapped', 'flag_only', 'llm_failed_unmapped')
+              {source_scope}
+            """,
+            scope_params,
         ).fetchone()[0],
     }
 
 
-def load_next_generated_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+def load_next_generated_group(conn: sqlite3.Connection, import_id: int | None = None) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    scope = f"AND {_scope_exists_sql('sc')}" if import_id is not None else ""
+    params = (import_id,) if import_id is not None else ()
     source = conn.execute(
-        """
+        f"""
         SELECT sc.*
         FROM source_cases sc
         JOIN generated_entries ge ON ge.source_case_id = sc.id
         WHERE ge.review_status IN ('new_high_confidence', 'needs_review')
           AND ge.upload_status IN ('not_uploaded', 'reset')
+          {scope}
         ORDER BY
+          CASE WHEN ge.mapping_rule_id LIKE 'llm:%' THEN 0 ELSE 1 END,
           CASE ge.review_status WHEN 'needs_review' THEN 0 ELSE 1 END,
           ge.id
         LIMIT 1
-        """
+        """,
+        params,
     ).fetchone()
     if not source:
         return None, []
@@ -194,9 +261,27 @@ def load_next_generated_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | N
     return source, entries
 
 
-def load_next_candidate_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+def load_next_candidate_group(conn: sqlite3.Connection, import_id: int | None = None) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    scope = f"AND {_scope_exists_sql('sc')}" if import_id is not None else ""
+    params = (import_id,) if import_id is not None else ()
     source = conn.execute(
-        """
+        f"""
+        SELECT sc.*
+        FROM source_cases sc
+        JOIN generated_entries ge ON ge.source_case_id = sc.id
+        WHERE ge.review_status IN ('new_high_confidence', 'needs_review')
+          AND ge.upload_status IN ('not_uploaded', 'reset')
+          AND ge.mapping_rule_id LIKE 'llm:%'
+          AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
+          {scope}
+        ORDER BY ge.id
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    if not source:
+        source = conn.execute(
+            f"""
         SELECT sc.*
         FROM source_cases sc
         WHERE EXISTS (
@@ -206,34 +291,41 @@ def load_next_candidate_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | N
             AND smc.user_status = 'pending'
         )
           AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
+          {scope}
         ORDER BY sc.study_date DESC, sc.id
         LIMIT 1
-        """
-    ).fetchone()
+        """,
+            params,
+        ).fetchone()
     if not source:
         source = conn.execute(
-            """
+            f"""
             SELECT sc.*
             FROM source_cases sc
             JOIN generated_entries ge ON ge.source_case_id = sc.id
             WHERE ge.review_status IN ('new_high_confidence', 'needs_review')
               AND ge.upload_status IN ('not_uploaded', 'reset')
               AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
+              {scope}
             ORDER BY
+              CASE WHEN ge.mapping_rule_id LIKE 'llm:%' THEN 0 ELSE 1 END,
               CASE ge.review_status WHEN 'needs_review' THEN 0 ELSE 1 END,
               ge.id
             LIMIT 1
-            """
+            """,
+            params,
         ).fetchone()
     if not source:
         source = conn.execute(
-            """
+            f"""
             SELECT sc.*
             FROM source_cases sc
-            WHERE sc.source_mapping_status IN ('unmapped', 'flag_only')
+            WHERE sc.source_mapping_status IN ('unmapped', 'flag_only', 'llm_failed_unmapped')
+              {scope}
             ORDER BY sc.study_date DESC, sc.id
             LIMIT 1
-            """
+            """,
+            params,
         ).fetchone()
     if not source:
         return None, []
@@ -241,15 +333,23 @@ def load_next_candidate_group(conn: sqlite3.Connection) -> tuple[sqlite3.Row | N
     return source, load_candidates(conn, int(source["id"]))
 
 
-def load_next_unmapped(conn: sqlite3.Connection, require_suggestion: bool | None = None) -> tuple[sqlite3.Row | None, list[dict[str, Any]]]:
+def load_next_unmapped(
+    conn: sqlite3.Connection,
+    require_suggestion: bool | None = None,
+    import_id: int | None = None,
+) -> tuple[sqlite3.Row | None, list[dict[str, Any]]]:
     rules, _ = load_mapping_rules()
+    scope = f"AND {_scope_exists_sql('source_cases')}" if import_id is not None else ""
+    params = (import_id,) if import_id is not None else ()
     rows = conn.execute(
-        """
+        f"""
         SELECT * FROM source_cases
-        WHERE source_mapping_status IN ('unmapped', 'flag_only')
+        WHERE source_mapping_status IN ('unmapped', 'flag_only', 'llm_failed_unmapped')
+          {scope}
         ORDER BY study_date DESC
         LIMIT 500
-        """
+        """,
+        params,
     ).fetchall()
     fallback: tuple[sqlite3.Row | None, list[dict[str, Any]]] = (None, [])
     for row in rows:
@@ -270,7 +370,7 @@ def remap_unresolved_cases(conn: sqlite3.Connection, limit: int | None = None) -
     validate_rules(rules)
     sql = """
         SELECT * FROM source_cases
-        WHERE source_mapping_status IN ('unmapped', 'flag_only')
+        WHERE source_mapping_status IN ('unmapped', 'flag_only', 'llm_failed_unmapped')
         ORDER BY study_date DESC
     """
     if limit:

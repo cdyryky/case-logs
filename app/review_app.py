@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +17,14 @@ from app.constants import DEFAULT_CASE_CLASS, DEFAULT_DB_PATH, DEFAULT_SITE
 from app.candidates import add_manual_candidates, approve_candidate_review, search_acgme_targets
 from app.export_payload import export_approved_json
 from app.importer import import_mpower_csv
+from app.llm_mapping import llm_health
 from app.learning import append_learned_rule, apply_mapping_to_matching_unsubmitted, learned_rule_count
 from app.models import connect, init_db, log_event, utc_now
 from app.parser import parse_mpower_report
 from app.review_queue import (
     best_report_context_for_source,
+    import_scope_summary,
+    latest_import,
     load_next_candidate_group,
     load_next_generated_group,
     load_next_unmapped,
@@ -31,9 +37,104 @@ from app.utils import case_year_from_date, canonical_key, format_acgme_date, pat
 DEFAULT_MPOWER_CSV_PATH = "data/exports/mpower-download-260526-clean.csv"
 
 
+def _new_import_job(path: str) -> dict[str, Any]:
+    return {
+        "path": path,
+        "use_llm": True,
+        "llm_timeout_seconds": 30.0,
+        "running": True,
+        "import_id": None,
+        "phase": "Queued",
+        "row": 0,
+        "total": 0,
+        "accession": "",
+        "summary": None,
+        "error": "",
+        "traceback": "",
+        "lock": threading.Lock(),
+        "thread": None,
+    }
+
+
+def _run_background_import(job: dict[str, Any]) -> None:
+    def update(values: dict[str, Any]) -> None:
+        with job["lock"]:
+            job.update(values)
+
+    def on_progress(event: dict[str, Any]) -> None:
+        update(
+            {
+                "row": int(event.get("row") or 0),
+                "total": int(event.get("total") or 0),
+                "accession": str(event.get("accession") or ""),
+                "phase": str(event.get("phase") or "Working"),
+                "import_id": event.get("import_id") or job.get("import_id"),
+            }
+        )
+
+    conn = connect(DEFAULT_DB_PATH)
+    try:
+        init_db(conn)
+        use_llm = bool(job.get("use_llm", True))
+        llm_timeout_seconds = float(job.get("llm_timeout_seconds") or 30.0)
+        summary = import_mpower_csv(
+            conn,
+            job["path"],
+            progress_callback=on_progress,
+            commit_per_row=True,
+            mapping_mode="llm" if use_llm else "legacy",
+            llm_timeout_seconds=llm_timeout_seconds,
+        )
+        conn.commit()
+        update({"summary": summary, "phase": "Complete", "running": False})
+    except Exception as exc:
+        conn.rollback()
+        update({"error": str(exc), "traceback": traceback.format_exc(), "phase": "Failed", "running": False})
+    finally:
+        conn.close()
+
+
+def start_background_import(path: str, use_llm: bool = True, llm_timeout_seconds: float = 30.0) -> dict[str, Any]:
+    job = _new_import_job(path)
+    job["use_llm"] = use_llm
+    job["llm_timeout_seconds"] = llm_timeout_seconds
+    thread = threading.Thread(target=_run_background_import, args=(job,), daemon=True)
+    job["thread"] = thread
+    thread.start()
+    return job
+
+
+def import_job_snapshot(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not job:
+        return None
+    with job["lock"]:
+        return {key: value for key, value in job.items() if key not in {"lock", "thread"}}
+
+
 def get_conn() -> sqlite3.Connection:
     conn = connect(DEFAULT_DB_PATH)
-    init_db(conn)
+    if st.session_state.get("_db_initialized"):
+        return conn
+    try:
+        init_db(conn)
+        st.session_state["_db_initialized"] = True
+    except sqlite3.OperationalError as exc:
+        if "database is locked" not in str(exc).lower():
+            conn.close()
+            raise
+        conn.rollback()
+        required = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name IN ('imports', 'source_cases', 'generated_entries', 'entry_events')
+            """
+        ).fetchone()[0]
+        if required < 4:
+            conn.close()
+            raise
+        st.session_state["_db_initialized"] = True
     return conn
 
 
@@ -68,12 +169,13 @@ def load_entries(conn: sqlite3.Connection, filter_name: str) -> pd.DataFrame:
         "Upload failures": "upload_status = 'failed'",
         "Submitted": "upload_status = 'submitted'",
     }[filter_name]
-    return pd.read_sql_query(
+    df = pd.read_sql_query(
         f"""
         SELECT ge.id, ge.case_date, ge.case_id, ge.role, ge.patient_type, ge.area, ge.type,
                ge.acgme_description, ge.acgme_def_category,
                ge.component_label, ge.mapping_confidence, ge.role_confidence, ge.compound_flag,
                ge.review_status, ge.upload_status, ge.mapping_rule_name, ge.failure_reason,
+               ge.evidence_excerpt, ge.llm_model, ge.llm_prompt_version,
                sc.exam_code, sc.procedure_text, sc.study_description, sc.attending_name, sc.parsed_report_json,
                sc.resident_found_in_report, sc.resident_position, sc.needs_review_reason
         FROM generated_entries ge
@@ -592,17 +694,25 @@ def mark_before_date(conn: sqlite3.Connection, cutoff: str, mode: str) -> int:
     return changed
 
 
-def load_unmapped(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_unmapped(conn: sqlite3.Connection, import_id: int | None = None) -> pd.DataFrame:
+    scope = (
+        "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = source_cases.id AND isc.import_id = ?)"
+        if import_id is not None
+        else ""
+    )
+    params = (import_id,) if import_id is not None else ()
     df = pd.read_sql_query(
-        """
+        f"""
         SELECT id, accession_number, study_date, exam_code, procedure_text, study_description,
                source_mapping_status, needs_review_reason, attending_name, parsed_report_json
         FROM source_cases
-        WHERE source_mapping_status IN ('unmapped', 'flag_only')
+        WHERE source_mapping_status IN ('unmapped', 'flag_only', 'llm_failed_unmapped')
+          {scope}
         ORDER BY study_date DESC
         LIMIT 1000
         """,
         conn,
+        params=params,
     )
     return add_parsed_report_preview(df)
 
@@ -614,10 +724,32 @@ st.caption(f"Learned mapping correction rules: {learned_rule_count()}")
 conn = get_conn()
 
 with st.sidebar:
+    st.header("Local LLM")
+    health = llm_health()
+    st.caption(f"Model: {health['model']}")
+    st.caption(f"Ollama: {health['base_url']} · ctx {health['num_ctx']}")
+    if health["reachable"] and health["model_available"]:
+        st.success("LLM reachable")
+    elif health["reachable"]:
+        st.warning("Ollama reachable; configured model not installed")
+    else:
+        st.warning("Ollama not reachable; imports will use legacy fallback")
+
     st.header("Import")
     import_path = st.text_input("Default mPower CSV", DEFAULT_MPOWER_CSV_PATH)
     uploaded = st.file_uploader("Optional alternate import file", type=["csv"])
-    if st.button("Import mPower CSV", type="primary"):
+    use_llm_for_import = st.toggle("Use local LLM for import mapping", value=True)
+    llm_timeout_seconds = st.number_input(
+        "LLM timeout per case (seconds)",
+        min_value=5,
+        max_value=600,
+        value=int(float(health.get("timeout_seconds") or 30)),
+        step=5,
+        disabled=not use_llm_for_import,
+    )
+    current_import = import_job_snapshot(st.session_state.get("import_job"))
+    import_running = bool(current_import and current_import["running"])
+    if st.button("Import mPower CSV", type="primary", disabled=import_running):
         path: str | Path
         if uploaded:
             tmp = Path("data/imports") / uploaded.name
@@ -626,10 +758,79 @@ with st.sidebar:
             path = tmp
         else:
             path = import_path
-        with st.spinner("Importing and mapping cases..."):
-            summary = import_mpower_csv(conn, path)
-            conn.commit()
-        st.success(f"Imported {summary['row_count']} rows; generated {summary['generated_entries_count']} entries.")
+        st.session_state["import_job"] = start_background_import(
+            str(path),
+            use_llm=use_llm_for_import,
+            llm_timeout_seconds=float(llm_timeout_seconds),
+        )
+        st.rerun()
+
+    current_import = import_job_snapshot(st.session_state.get("import_job"))
+    if current_import:
+        total = max(int(current_import.get("total") or 1), 1)
+        row = min(int(current_import.get("row") or 0), total)
+        phase = str(current_import.get("phase") or "Working")
+        accession = str(current_import.get("accession") or "-")
+        progress_label = f"{row}/{total} · {accession} · {phase}"
+        st.progress(row / total, text=progress_label)
+        if current_import.get("running"):
+            st.info("Import is running in the background. Newly mapped cases are available in the review queue as they finish.")
+            if st.button("Refresh import status"):
+                st.rerun()
+        elif current_import.get("error"):
+            st.error(f"Import failed: {current_import['error']}")
+            with st.expander("Import error details"):
+                st.code(str(current_import.get("traceback") or ""))
+            if st.button("Clear failed import"):
+                st.session_state.pop("import_job", None)
+                st.rerun()
+        else:
+            summary = current_import.get("summary") or {}
+            st.success(
+                "Imported {row_count} rows; generated {generated_entries_count} entries.".format(
+                    row_count=summary.get("row_count", row),
+                    generated_entries_count=summary.get("generated_entries_count", 0),
+                )
+            )
+            if st.button("Clear completed import"):
+                st.session_state.pop("import_job", None)
+                st.rerun()
+
+    latest = latest_import(conn)
+    running_import_id = int(current_import["import_id"]) if current_import and current_import.get("import_id") else None
+    latest_import_id = running_import_id or (int(latest["id"]) if latest else None)
+    st.header("Review scope")
+    scope_choice = st.radio(
+        "Scope",
+        ["Latest import", "All backlog"],
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    active_import_id = latest_import_id if scope_choice == "Latest import" else None
+    scope = import_scope_summary(conn, active_import_id)
+    if active_import_id is None:
+        st.caption("Reviewing all historical backlog")
+    else:
+        st.caption(
+            "Reviewing import #{import_id} · {mapped}/{scoped} cases mapped · {rows} rows processed".format(
+                import_id=active_import_id,
+                mapped=scope.get("mapped_source_cases", 0),
+                scoped=scope.get("scoped_source_cases", 0),
+                rows=scope.get("row_count", 0),
+            )
+        )
+
+    if import_running:
+        @st.fragment(run_every="3s")
+        def auto_refresh_import() -> None:
+            now = time.monotonic()
+            last = float(st.session_state.get("last_import_auto_refresh", now))
+            st.session_state["last_import_auto_refresh"] = now
+            if now - last >= 2.5:
+                st.rerun(scope="app")
+
+        auto_refresh_import()
 
     st.header("Export")
     if st.button("Export approved JSON"):
@@ -649,7 +850,7 @@ with st.sidebar:
 tab_review, tab_diagnostics, tab_imports = st.tabs(["Review Queue", "Diagnostics", "Imports"])
 
 with tab_review:
-    counts = review_counts(conn)
+    counts = review_counts(conn, active_import_id)
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Batch approvable", counts["batch_approvable"])
     m2.metric("Needs review", counts["needs_review"])
@@ -681,19 +882,26 @@ with tab_review:
             st.rerun()
 
     if queue == "Needs review":
-        source, candidates = load_next_candidate_group(conn)
+        source, candidates = load_next_candidate_group(conn, active_import_id)
         if not source:
-            st.info("No candidate mappings need review.")
+            if active_import_id is not None and import_running:
+                st.info("Waiting for LLM-mapped cases from this import.")
+            elif active_import_id is not None:
+                st.info("No reviewable cases in this import yet. Use All backlog to review historical cases.")
+            else:
+                st.info("No candidate mappings need review.")
         else:
             source_context(conn, source)
             candidate_review_card(conn, source, candidates)
 
-            legacy_source, entries = load_next_generated_group(conn)
+            legacy_source, entries = load_next_generated_group(conn, active_import_id)
             if legacy_source and int(legacy_source["id"]) == int(source["id"]) and entries:
-                with st.expander("Legacy generated entries"):
+                generated_rows_are_llm = any((row["mapping_rule_id"] or "").startswith("llm:") for row in entries)
+                with st.expander("Generated entries", expanded=generated_rows_are_llm):
                     rows = [
                         {
                             "id": row["id"],
+                            "source": row["mapping_rule_name"],
                             "role": row["role"],
                             "area": row["area"],
                             "type": row["type"],
@@ -701,13 +909,29 @@ with tab_review:
                             "def_cat": row["acgme_def_category"],
                             "confidence": row["mapping_confidence"],
                             "reason": row["comments"] or row["mapping_rule_name"],
+                            "evidence": row["evidence_excerpt"] if "evidence_excerpt" in row.keys() else "",
+                            "llm_model": row["llm_model"] if "llm_model" in row.keys() else "",
                         }
                         for row in entries
                     ]
                     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+                    generated_ids = [int(row["id"]) for row in entries]
+                    approve_col, skip_col = st.columns(2)
+                    with approve_col:
+                        if st.button("Approve generated entries", type="primary", key=f"approve_generated_{source['id']}"):
+                            update_review_status(conn, generated_ids, "approved")
+                            st.rerun()
+                    with skip_col:
+                        if st.button("Skip generated entries", key=f"skip_generated_{source['id']}"):
+                            update_review_status(conn, generated_ids, "skipped")
+                            st.rerun()
 
     elif queue in {"Unmapped with suggestions", "Unmapped without suggestions"}:
-        source, suggestions = load_next_unmapped(conn, require_suggestion=queue == "Unmapped with suggestions")
+        source, suggestions = load_next_unmapped(
+            conn,
+            require_suggestion=queue == "Unmapped with suggestions",
+            import_id=active_import_id,
+        )
         if not source:
             st.info("No source cases in this queue.")
         else:
@@ -786,7 +1010,7 @@ with tab_diagnostics:
     df = load_entries(conn, filter_name)
     st.caption(f"{len(df)} generated entries")
     st.dataframe(df, width="stretch", hide_index=True)
-    unmapped = load_unmapped(conn)
+    unmapped = load_unmapped(conn, active_import_id)
     st.caption("Unmapped and flag-only source cases")
     st.dataframe(unmapped, width="stretch", hide_index=True)
 
