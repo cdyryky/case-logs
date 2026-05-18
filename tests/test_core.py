@@ -30,7 +30,14 @@ from app.matching import match_tokens
 from app.mapper import load_mapping_rules, map_source_case
 from app.models import init_db
 from app.parser import parse_mpower_report, parse_mpower_role_metadata, transform_mpower_row
-from app.review_queue import best_report_context_for_source, load_next_candidate_group, remap_unresolved_cases, review_counts
+from app.review_queue import (
+    best_report_context_for_source,
+    load_next_candidate_group,
+    load_next_failed_upload_group,
+    load_next_high_confidence_group,
+    remap_unresolved_cases,
+    review_counts,
+)
 from app.review_queue import clear_deterministic_review_state
 from app.upload_queue import (
     claim_next,
@@ -1389,6 +1396,105 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(queued_source["id"], source_id)
         self.assertTrue(candidates)
         self.assertGreater(conn.execute("SELECT COUNT(*) FROM source_match_candidates").fetchone()[0], 0)
+
+    def test_inbox_queue_loaders_separate_high_low_no_match_and_failed_uploads(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        raw = {
+            "Accession Number": "202601040009",
+            "Modality": "US",
+            "Exam Code": "USGUDPARAC",
+            "Exam Description": "US GUIDED PARACENTESIS",
+            "CPT Code": "49083",
+            "Report Text": (
+                "ULTRASOUND-GUIDED PARACENTESIS\n\n"
+                "PROCEDURE PERSONNEL:\n"
+                "Attending: Example Attending\n"
+                "Other: Cody Key\n\n"
+                "FINDINGS/IMPRESSION:\n"
+                "1. Successful ultrasound-guided paracentesis.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-04 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        source = transform_mpower_row(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
+        entries, _ = map_source_case(source, *load_mapping_rules())
+        insert_generated_entries(conn, source_id, entries)
+        conn.execute(
+            """
+            UPDATE generated_entries
+            SET review_status = 'new_high_confidence',
+                mapping_confidence = 'high',
+                role_confidence = 'high',
+                compound_flag = 0,
+                upload_status = 'not_uploaded'
+            WHERE source_case_id = ?
+            """,
+            (source_id,),
+        )
+        conn.commit()
+
+        counts = review_counts(conn)
+        self.assertGreaterEqual(counts["high_confidence"], 1)
+        self.assertEqual(counts["low_confidence"], 0)
+        high_source, high_entries = load_next_high_confidence_group(conn)
+        self.assertEqual(high_source["id"], source_id)
+        self.assertTrue(high_entries)
+        low_source, low_candidates = load_next_candidate_group(conn, include_unmapped=False)
+        self.assertIsNone(low_source)
+        self.assertEqual(low_candidates, [])
+
+        conn.execute(
+            "UPDATE generated_entries SET upload_status = 'failed', failure_reason = 'browser timeout' WHERE source_case_id = ?",
+            (source_id,),
+        )
+        conn.commit()
+        failed_source, failed_entries = load_next_failed_upload_group(conn)
+        self.assertEqual(failed_source["id"], source_id)
+        self.assertTrue(failed_entries)
+        self.assertEqual(review_counts(conn)["failed_uploads"], len(failed_entries))
+
+    def test_insert_generated_entries_revives_skipped_unuploaded_duplicate(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+        raw = {
+            "Accession Number": "202601040012",
+            "Modality": "US",
+            "Exam Code": "USGUDPARAC",
+            "Exam Description": "US GUIDED PARACENTESIS",
+            "CPT Code": "49083",
+            "Report Text": (
+                "ULTRASOUND-GUIDED PARACENTESIS\n\n"
+                "PROCEDURE PERSONNEL:\n"
+                "Attending: Example Attending\n"
+                "Other: Cody Key\n\n"
+                "FINDINGS/IMPRESSION:\n"
+                "1. Successful ultrasound-guided paracentesis.\n"
+            ),
+            "Patient Age": "42",
+            "Exam Started Date": "2026-01-04 10:00:00-08:00",
+            "Report Finalized By": "Attending, Example",
+        }
+        source = transform_mpower_row(raw)
+        source_id, _ = insert_source_case(conn, source, "sample.csv", 1)
+        entries, _ = map_source_case(source, *load_mapping_rules())
+        self.assertGreater(insert_generated_entries(conn, source_id, entries), 0)
+        conn.execute(
+            "UPDATE generated_entries SET review_status = 'skipped', upload_status = 'not_uploaded' WHERE source_case_id = ?",
+            (source_id,),
+        )
+        conn.commit()
+
+        revived = insert_generated_entries(conn, source_id, entries)
+
+        self.assertGreater(revived, 0)
+        rows = conn.execute("SELECT review_status FROM generated_entries WHERE source_case_id = ?", (source_id,)).fetchall()
+        self.assertTrue(rows)
+        self.assertTrue(all(row["review_status"] != "skipped" for row in rows))
 
     def test_candidate_queue_ignores_stale_algorithm_candidates(self) -> None:
         conn = sqlite3.connect(":memory:")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import html
 import sqlite3
 import threading
 import time
@@ -10,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from app.config_io import load_dropdowns
 from app.config_io import load_resident_profile
@@ -27,7 +29,9 @@ from app.review_queue import (
     import_scope_summary,
     latest_import,
     load_next_candidate_group,
+    load_next_failed_upload_group,
     load_next_generated_group,
+    load_next_high_confidence_group,
     load_next_unmapped,
     remap_unresolved_cases,
     review_counts,
@@ -453,6 +457,187 @@ def default_values_for_source(source: sqlite3.Row) -> dict[str, object]:
     }
 
 
+def install_review_css() -> None:
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stMetric"] {background: transparent; border: 0; padding: 0;}
+        div[data-testid="stMetricValue"] {font-size: 1.05rem;}
+        .review-meta {
+            border: 1px solid #e6e8eb;
+            border-radius: 8px;
+            padding: 0.65rem 0.75rem;
+            margin: 0.35rem 0 0.75rem 0;
+            background: #fbfbfc;
+        }
+        .review-meta-title {
+            font-weight: 700;
+            font-size: 1.18rem;
+            line-height: 1.25;
+            margin-bottom: 0.35rem;
+            color: #252735;
+        }
+        .review-meta-grid {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 0.35rem 0.7rem;
+            font-size: 0.84rem;
+        }
+        .review-meta-label {
+            color: #7a7f8c;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0;
+        }
+        .review-chip {
+            display: inline-block;
+            border: 1px solid #d9dde3;
+            border-radius: 8px;
+            padding: 0.16rem 0.42rem;
+            margin: 0.08rem 0.18rem 0.08rem 0;
+            background: #fff;
+            font-size: 0.78rem;
+            color: #303342;
+        }
+        .review-warning {
+            border-color: #f1d58a;
+            background: #fff9e6;
+            color: #7b5a00;
+        }
+        .procedure-row {
+            border-top: 1px solid #edf0f2;
+            padding: 0.35rem 0 0.3rem 0;
+        }
+        .procedure-meta {
+            color: #737985;
+            font-size: 0.78rem;
+            line-height: 1.3;
+        }
+        .pane-label {
+            color: #6f7480;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0;
+            margin-top: 0.2rem;
+        }
+        .review-actions {
+            border-top: 1px solid #e6e8eb;
+            padding-top: 0.65rem;
+            margin-top: 0.75rem;
+        }
+        section[data-testid="stSidebar"] .stButton button {width: 100%;}
+        @media (max-width: 1100px) {
+            .review-meta-grid {grid-template-columns: repeat(2, minmax(0, 1fr));}
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def scroll_to_top_on_next_render() -> None:
+    st.session_state["_scroll_to_top"] = True
+
+
+def maybe_scroll_to_top() -> None:
+    if st.session_state.pop("_scroll_to_top", False):
+        components.html(
+            """
+            <script>
+            const root = window.parent || window;
+            root.scrollTo({top: 0, left: 0, behavior: "auto"});
+            </script>
+            """,
+            height=0,
+        )
+
+
+def source_title(source: sqlite3.Row) -> str:
+    return str(source["procedure_text"] or source["study_description"] or "Unlabeled case")
+
+
+def compact_case_header(conn: sqlite3.Connection, source: sqlite3.Row, *, status: str = "") -> dict[str, Any]:
+    mapping_source = source_row_to_mapping_source(source)
+    derived = mapping_source["derived"]
+    report_context = best_report_context_for_source(conn, source)
+    parsed = report_context["parsed"] or parsed_report_for_source(source)
+    visible_warnings = []
+    if parsed:
+        visible_warnings = [
+            str(item)
+            for item in parsed.get("parse_warnings") or []
+            if item not in {"missing_impression", "missing_procedure_summary", "missing_personnel_section", "personnel_role_low_confidence"}
+        ]
+    if source["needs_review_reason"]:
+        visible_warnings.append(str(source["needs_review_reason"]))
+    chips = []
+    if status:
+        chips.append(f"<span class='review-chip'>{html.escape(status)}</span>")
+    chips.extend(f"<span class='review-chip review-warning'>{html.escape(warning)}</span>" for warning in visible_warnings[:3])
+    st.markdown(
+        """
+        <div class="review-meta">
+          <div class="review-meta-title">{title}</div>
+          <div class="review-meta-grid">
+            <div><div class="review-meta-label">Date</div><div>{date}</div></div>
+            <div><div class="review-meta-label">Accession</div><div>{accession}</div></div>
+            <div><div class="review-meta-label">Exam</div><div>{exam}</div></div>
+            <div><div class="review-meta-label">Role</div><div>{role} ({role_conf})</div></div>
+            <div><div class="review-meta-label">Study</div><div>{study}</div></div>
+            <div><div class="review-meta-label">Attending</div><div>{attending}</div></div>
+          </div>
+          <div>{chips}</div>
+        </div>
+        """.format(
+            title=html.escape(source_title(source)),
+            date=html.escape(format_acgme_date(source["study_date"])),
+            accession=html.escape(str(source["accession_number"])),
+            exam=html.escape(str(source["exam_code"] or "-")),
+            role=html.escape(str(derived["role"])),
+            role_conf=html.escape(str(derived["role_confidence"])),
+            study=html.escape(str(source["study_description"] or "-")),
+            attending=html.escape(str(source["attending_name"] or "-")),
+            chips="".join(chips),
+        ),
+        unsafe_allow_html=True,
+    )
+    return {"derived": derived, "report_context": report_context, "parsed": parsed}
+
+
+def render_report_evidence(report_context: dict[str, Any], source: sqlite3.Row) -> None:
+    parsed = report_context["parsed"] or parsed_report_for_source(source)
+    st.markdown("<div class='pane-label'>Report evidence</div>", unsafe_allow_html=True)
+    if not parsed:
+        st.caption("Parsed report missing.")
+    elif parsed.get("procedure_title"):
+        st.write(f"**Procedure title:** {parsed['procedure_title']}")
+    if parsed.get("impression"):
+        st.markdown("**Impression**")
+        st.text(str(parsed["impression"]))
+    summaries = parsed.get("procedure_summary_sections") or []
+    if summaries:
+        st.markdown("**Procedure summary**")
+        for section in summaries:
+            heading = section.get("heading") or "PROCEDURE SUMMARY"
+            lines = [str(line).strip() for line in (section.get("bullets") or section.get("lines") or []) if str(line).strip()]
+            additional = [str(line).strip() for line in section.get("additional_procedures") or [] if str(line).strip()]
+            if lines:
+                st.caption(str(heading))
+                st.markdown("\n".join(f"- {line}" for line in lines))
+            if additional:
+                st.caption("Additional procedures")
+                st.markdown("\n".join(f"- {line}" for line in additional))
+    phrases = [str(item).strip() for item in parsed.get("candidate_procedure_phrases") or [] if str(item).strip()]
+    if phrases:
+        with st.expander("Parsed candidate phrases", expanded=False):
+            st.markdown("\n".join(f"- {phrase}" for phrase in phrases[:20]))
+    raw_text = report_context["raw_text"] or (source["report_snippet"] if "report_snippet" in source.keys() else "")
+    if raw_text:
+        with st.expander("Raw report", expanded=False):
+            st.text(raw_text)
+
+
 def source_context(conn: sqlite3.Connection, source: sqlite3.Row) -> None:
     mapping_source = source_row_to_mapping_source(source)
     derived = mapping_source["derived"]
@@ -568,7 +753,12 @@ def _render_candidate_checks(rows: list[sqlite3.Row], default_checked: bool) -> 
     return selected_ids
 
 
-def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candidates: list[sqlite3.Row]) -> None:
+def render_candidate_selector(
+    source: sqlite3.Row,
+    candidates: list[sqlite3.Row],
+    *,
+    possible_limit: int = 4,
+) -> tuple[set[int], list[dict[str, object]]]:
     selected_ids: set[int] = set()
     initially_selected_ids = {
         int(row["id"])
@@ -582,17 +772,23 @@ def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candida
     ]
     possible = [row for row in candidates if int(row["id"]) not in initially_selected_ids]
 
-    st.markdown("**Selected mappings**")
+    st.markdown("<div class='pane-label'>Checked procedures</div>", unsafe_allow_html=True)
     if not selected:
         st.caption("No mappings are currently selected.")
     selected_ids.update(_render_candidate_checks(selected, True))
 
-    with st.expander("Possible matches", expanded=bool(possible)):
-        if not possible:
-            st.caption("No additional possible matches.")
-        selected_ids.update(_render_candidate_checks(possible, False))
+    st.markdown("<div class='pane-label'>Suggestions</div>", unsafe_allow_html=True)
+    visible_possible = possible[:possible_limit]
+    overflow_possible = possible[possible_limit:]
+    if not possible:
+        st.caption("No additional possible matches.")
+    else:
+        selected_ids.update(_render_candidate_checks(visible_possible, False))
+        if overflow_possible:
+            with st.expander(f"{len(overflow_possible)} more suggestions", expanded=False):
+                selected_ids.update(_render_candidate_checks(overflow_possible, False))
 
-    st.markdown("**Search ACGME procedures**")
+    st.markdown("<div class='pane-label'>Search ACGME procedures</div>", unsafe_allow_html=True)
     query = st.text_input("Search by description, type, area, or def cat", key=f"acgme_search_{source['id']}")
     results = search_acgme_targets(query) if query else []
     checked_results: list[dict[str, object]] = []
@@ -608,7 +804,11 @@ def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candida
                 checked_results.append(target)
     elif query:
         st.caption("No official ACGME targets matched that search.")
+    return selected_ids, checked_results
 
+
+def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candidates: list[sqlite3.Row]) -> None:
+    selected_ids, checked_results = render_candidate_selector(source, candidates)
     approve_col, skip_col = st.columns(2)
     with approve_col:
         if st.button("Approve checked", type="primary", key=f"approve_candidates_{source['id']}"):
@@ -616,12 +816,238 @@ def candidate_review_card(conn: sqlite3.Connection, source: sqlite3.Row, candida
                 selected_ids.update(add_manual_candidates(conn, int(source["id"]), checked_results))
             inserted = approve_candidate_review(conn, int(source["id"]), selected_ids)
             st.success(f"Approved {len(selected_ids)} mappings; created {inserted} new entries.")
+            scroll_to_top_on_next_render()
             st.rerun()
     with skip_col:
         if st.button("Skip this case", key=f"skip_candidates_{source['id']}"):
             approve_candidate_review(conn, int(source["id"]), set())
             st.success("Skipped this case.")
+            scroll_to_top_on_next_render()
             st.rerun()
+
+
+def entry_label(entry: sqlite3.Row) -> str:
+    return str(entry["acgme_description"] or entry["type"] or "Generated procedure")
+
+
+def entry_metadata(entry: sqlite3.Row) -> str:
+    parts = []
+    if "acgme_code" in entry.keys() and entry["acgme_code"]:
+        parts.append(str(entry["acgme_code"]))
+    parts.append(f"{entry['area']} / {entry['type']}")
+    if entry["acgme_def_category"]:
+        parts.append(f"Def Cat: {entry['acgme_def_category']}")
+    confidence = entry["mapping_confidence"] if "mapping_confidence" in entry.keys() else ""
+    if confidence:
+        parts.append(f"Confidence: {confidence}")
+    return " | ".join(parts)
+
+
+def render_generated_entry_checks(entries: list[sqlite3.Row], *, key_prefix: str, default_checked: bool = True) -> set[int]:
+    selected_ids: set[int] = set()
+    if not entries:
+        st.caption("No generated procedures.")
+        return selected_ids
+    for row in entries:
+        checked = st.checkbox(
+            entry_label(row),
+            value=default_checked,
+            key=f"{key_prefix}_entry_{row['id']}",
+            help=(row["evidence_excerpt"] if "evidence_excerpt" in row.keys() else "") or row["comments"] or row["mapping_rule_name"] or None,
+        )
+        st.markdown(
+            f"<div class='procedure-meta'>{html.escape(entry_metadata(row))}</div>",
+            unsafe_allow_html=True,
+        )
+        if "failure_reason" in row.keys() and row["failure_reason"]:
+            st.caption(f"Failure: {row['failure_reason']}")
+        if checked:
+            selected_ids.add(int(row["id"]))
+    return selected_ids
+
+
+def target_to_manual_values(source: sqlite3.Row, target: dict[str, object], *, comments: str = "") -> dict[str, object]:
+    values = default_values_for_source(source)
+    values.update(
+        {
+            "acgme_code": target.get("acgme_code", ""),
+            "area": target.get("area", ""),
+            "type": target.get("type", ""),
+            "acgme_description": target.get("acgme_description", ""),
+            "acgme_def_category": target.get("acgme_def_category", ""),
+            "keyword": target.get("keyword", ""),
+            "component_label": target.get("component_label", "") or values["component_label"],
+            "comments": comments or target.get("reason", "") or target.get("match_reason", "") or "Added from review UI.",
+        }
+    )
+    return values
+
+
+def create_manual_entries_from_targets(conn: sqlite3.Connection, source: sqlite3.Row, targets: list[dict[str, object]]) -> int:
+    created = 0
+    for target in targets:
+        create_manual_entry(conn, int(source["id"]), target_to_manual_values(source, target))
+        created += 1
+    return created
+
+
+def render_target_suggestions(
+    source: sqlite3.Row,
+    suggestions: list[dict[str, object]],
+    *,
+    key_prefix: str,
+    possible_limit: int = 4,
+) -> list[dict[str, object]]:
+    checked: list[dict[str, object]] = []
+    visible = suggestions[:possible_limit]
+    overflow = suggestions[possible_limit:]
+    if not suggestions:
+        st.caption("No suggested procedures.")
+    for idx, target in enumerate(visible):
+        selected = st.checkbox(
+            target_primary_label(target),
+            value=False,
+            key=f"{key_prefix}_suggestion_{source['id']}_{idx}_{target.get('area', '')}_{target.get('type', '')}",
+        )
+        meta = target_metadata(target)
+        if target.get("confidence") or target.get("score"):
+            meta = f"{meta} | {target.get('confidence', '')} {target.get('score', '')}".strip()
+        st.caption(meta)
+        if selected:
+            checked.append(target)
+    if overflow:
+        with st.expander(f"{len(overflow)} more suggestions", expanded=False):
+            for idx, target in enumerate(overflow, start=len(visible)):
+                selected = st.checkbox(
+                    target_primary_label(target),
+                    value=False,
+                    key=f"{key_prefix}_suggestion_{source['id']}_{idx}_{target.get('area', '')}_{target.get('type', '')}",
+                )
+                st.caption(target_metadata(target))
+                if selected:
+                    checked.append(target)
+    return checked
+
+
+def render_target_search(source: sqlite3.Row, *, key_prefix: str) -> list[dict[str, object]]:
+    query = st.text_input("Search by description, type, area, or def cat", key=f"{key_prefix}_search_{source['id']}")
+    results = search_acgme_targets(query) if query else []
+    checked: list[dict[str, object]] = []
+    if results:
+        for idx, target in enumerate(results[:10]):
+            selected = st.checkbox(
+                target_primary_label(target),
+                value=False,
+                key=f"{key_prefix}_search_result_{source['id']}_{idx}_{target.get('acgme_code', '')}_{target['area']}_{target['type']}_{target.get('acgme_description', '')}",
+            )
+            st.caption(target_metadata(target))
+            if selected:
+                checked.append(target)
+    elif query:
+        st.caption("No official ACGME targets matched that search.")
+    return checked
+
+
+def generated_entry_review_card(
+    conn: sqlite3.Connection,
+    source: sqlite3.Row,
+    entries: list[sqlite3.Row],
+    *,
+    key_prefix: str,
+    approve_label: str = "Approve checked",
+) -> None:
+    st.markdown("<div class='pane-label'>Checked procedures</div>", unsafe_allow_html=True)
+    selected_ids = render_generated_entry_checks(entries, key_prefix=key_prefix, default_checked=True)
+    st.markdown("<div class='pane-label'>Suggestions</div>", unsafe_allow_html=True)
+    st.caption("No additional deterministic suggestions for this generated entry.")
+    st.markdown("<div class='pane-label'>Search ACGME procedures</div>", unsafe_allow_html=True)
+    checked_results = render_target_search(source, key_prefix=key_prefix)
+    approve_col, skip_col = st.columns(2)
+    with approve_col:
+        if st.button(approve_label, type="primary", key=f"{key_prefix}_approve_{source['id']}"):
+            skipped = [int(row["id"]) for row in entries if int(row["id"]) not in selected_ids]
+            if selected_ids:
+                update_review_status(conn, sorted(selected_ids), "approved")
+            if skipped:
+                update_review_status(conn, skipped, "skipped")
+            created = create_manual_entries_from_targets(conn, source, checked_results) if checked_results else 0
+            st.success(f"Approved {len(selected_ids)} entries; added {created} manual entries.")
+            scroll_to_top_on_next_render()
+            st.rerun()
+    with skip_col:
+        if st.button("Skip this case", key=f"{key_prefix}_skip_{source['id']}"):
+            update_review_status(conn, [int(row["id"]) for row in entries], "skipped")
+            scroll_to_top_on_next_render()
+            st.rerun()
+
+
+def no_match_review_card(conn: sqlite3.Connection, source: sqlite3.Row, suggestions: list[dict[str, object]]) -> None:
+    st.markdown("<div class='pane-label'>Checked procedures</div>", unsafe_allow_html=True)
+    st.caption("No procedures are currently checked.")
+    st.markdown("<div class='pane-label'>Suggestions</div>", unsafe_allow_html=True)
+    checked_suggestions = render_target_suggestions(source, suggestions, key_prefix="no_match")
+    st.markdown("<div class='pane-label'>Search ACGME procedures</div>", unsafe_allow_html=True)
+    checked_results = render_target_search(source, key_prefix="no_match")
+    approve_col, skip_col = st.columns(2)
+    with approve_col:
+        if st.button("Approve checked", type="primary", key=f"no_match_approve_{source['id']}"):
+            selected = checked_suggestions + checked_results
+            created = create_manual_entries_from_targets(conn, source, selected) if selected else 0
+            if created == 0:
+                conn.execute(
+                    "UPDATE source_cases SET source_mapping_status = 'candidate_reviewed_empty' WHERE id = ?",
+                    (source["id"],),
+                )
+                conn.commit()
+            st.success(f"Created {created} entries.")
+            scroll_to_top_on_next_render()
+            st.rerun()
+    with skip_col:
+        if st.button("Skip this case", key=f"no_match_skip_{source['id']}"):
+            conn.execute(
+                "UPDATE source_cases SET source_mapping_status = 'excluded', needs_review_reason = COALESCE(needs_review_reason, 'Skipped in review') WHERE id = ?",
+                (source["id"],),
+            )
+            conn.commit()
+            scroll_to_top_on_next_render()
+            st.rerun()
+
+
+def failed_upload_review_card(conn: sqlite3.Connection, source: sqlite3.Row, entries: list[sqlite3.Row]) -> None:
+    st.markdown("<div class='pane-label'>Checked failed procedures</div>", unsafe_allow_html=True)
+    selected_ids = render_generated_entry_checks(entries, key_prefix="failed_upload", default_checked=True)
+    st.markdown("<div class='pane-label'>Suggestions</div>", unsafe_allow_html=True)
+    st.caption("Failed uploads keep their original mapped procedures. Use search only if the target needs correction.")
+    st.markdown("<div class='pane-label'>Search ACGME procedures</div>", unsafe_allow_html=True)
+    checked_results = render_target_search(source, key_prefix="failed_upload")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Reset checked for upload", type="primary", disabled=not selected_ids, key=f"failed_reset_{source['id']}"):
+            reset_upload(conn, sorted(selected_ids))
+            created = create_manual_entries_from_targets(conn, source, checked_results) if checked_results else 0
+            st.success(f"Reset {len(selected_ids)} entries; added {created} manual entries.")
+            scroll_to_top_on_next_render()
+            st.rerun()
+    with c2:
+        if st.button("Mark checked submitted", disabled=not selected_ids, key=f"failed_submitted_{source['id']}"):
+            mark_upload_submitted(conn, sorted(selected_ids))
+            scroll_to_top_on_next_render()
+            st.rerun()
+
+
+def render_review_workspace(
+    conn: sqlite3.Connection,
+    source: sqlite3.Row,
+    render_procedure_pane: Any,
+    *,
+    status: str = "",
+) -> None:
+    context = compact_case_header(conn, source, status=status)
+    report_col, procedure_col = st.columns([1.45, 1], gap="medium")
+    with report_col:
+        render_report_evidence(context["report_context"], source)
+    with procedure_col:
+        render_procedure_pane()
 
 
 def mapping_form(
@@ -719,6 +1145,8 @@ def load_unmapped(conn: sqlite3.Connection, import_id: int | None = None) -> pd.
 
 
 st.set_page_config(page_title="ACGME IR Case Logs", layout="wide")
+install_review_css()
+maybe_scroll_to_top()
 st.title("ACGME IR Case Log Review")
 st.caption(f"Learned mapping correction rules: {learned_rule_count()}")
 
@@ -864,53 +1292,80 @@ tab_review, tab_diagnostics, tab_imports = st.tabs(["Review Queue", "Diagnostics
 
 with tab_review:
     counts = review_counts(conn, active_import_id)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Batch approvable", counts["batch_approvable"])
-    m2.metric("Needs review", counts["needs_review"])
-    m3.metric("Unmapped", counts["unmapped_total"])
-    m4.metric("Upload failures", counts["upload_failures"])
+    tab_high, tab_low, tab_no_match, tab_failed = st.tabs(
+        [
+            f"High Confidence ({counts['high_confidence']})",
+            f"Low Confidence ({counts['low_confidence']})",
+            f"No Match ({counts['no_match']})",
+            f"Failed Uploads ({counts['failed_uploads']})",
+        ]
+    )
 
-    qc1, qc2 = st.columns([2, 1])
-    with qc1:
-        queue = st.radio(
-            "Queue",
-            ["Needs review", "Unmapped with suggestions", "Unmapped without suggestions", "Upload failures"],
-            horizontal=True,
-        )
-    with qc2:
-        if st.button("Approve all safe high-confidence", disabled=counts["batch_approvable"] == 0):
-            ids = pd.read_sql_query(
-                """
-                SELECT id FROM generated_entries
-                WHERE review_status = 'new_high_confidence'
-                  AND mapping_confidence = 'high'
-                  AND role_confidence = 'high'
-                  AND compound_flag = 0
-                  AND upload_status IN ('not_uploaded', 'reset')
-                """,
+    with tab_high:
+        action_col, note_col = st.columns([1, 3])
+        with action_col:
+            if st.button("Accept all", type="primary", disabled=counts["high_confidence"] == 0, key="accept_all_high_confidence"):
+                scope_filter = (
+                    "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = generated_entries.source_case_id AND isc.import_id = ?)"
+                    if active_import_id is not None
+                    else ""
+                )
+                ids = pd.read_sql_query(
+                    f"""
+                    SELECT id FROM generated_entries
+                    WHERE review_status = 'new_high_confidence'
+                      AND mapping_confidence = 'high'
+                      AND role_confidence = 'high'
+                      AND compound_flag = 0
+                      AND upload_status IN ('not_uploaded', 'reset')
+                      {scope_filter}
+                    """,
+                    conn,
+                    params=(active_import_id,) if active_import_id is not None else (),
+                )["id"].astype(int).tolist()
+                update_review_status(conn, ids, "approved")
+                st.success(f"Approved {len(ids)} high-confidence entries.")
+                scroll_to_top_on_next_render()
+                st.rerun()
+        with note_col:
+            st.caption("Safe single-procedure, high-confidence entries. Review one case below or accept the full current scope.")
+        source, entries = load_next_high_confidence_group(conn, active_import_id)
+        if not source:
+            st.info("No high-confidence cases in this scope.")
+        else:
+            render_review_workspace(
                 conn,
-            )["id"].astype(int).tolist()
-            update_review_status(conn, ids, "approved")
-            st.success(f"Approved {len(ids)} entries.")
-            st.rerun()
+                source,
+                lambda: generated_entry_review_card(
+                    conn,
+                    source,
+                    entries,
+                    key_prefix="high_confidence",
+                    approve_label="Approve checked",
+                ),
+                status="High confidence",
+            )
 
-    if queue == "Needs review":
-        source, candidates = load_next_candidate_group(conn, active_import_id)
+    with tab_low:
+        source, candidates = load_next_candidate_group(conn, active_import_id, include_unmapped=False)
         if not source:
             if active_import_id is not None and import_running:
-                st.info("Waiting for LLM-mapped cases from this import.")
+                st.info("Waiting for mapped cases from this import.")
             elif active_import_id is not None:
-                st.info("No reviewable cases in this import yet. Use All backlog to review historical cases.")
+                st.info("No low-confidence cases in this import. Use All backlog to review historical cases.")
             else:
-                st.info("No candidate mappings need review.")
+                st.info("No low-confidence cases need review.")
         else:
-            source_context(conn, source)
-            candidate_review_card(conn, source, candidates)
-
+            render_review_workspace(
+                conn,
+                source,
+                lambda: candidate_review_card(conn, source, candidates),
+                status="Low confidence",
+            )
             legacy_source, entries = load_next_generated_group(conn, active_import_id)
             if legacy_source and int(legacy_source["id"]) == int(source["id"]) and entries:
                 generated_rows_are_llm = any((row["mapping_rule_id"] or "").startswith("llm:") for row in entries)
-                with st.expander("Generated entries", expanded=generated_rows_are_llm):
+                with st.expander("Generated entries for this case", expanded=generated_rows_are_llm):
                     rows = [
                         {
                             "id": row["id"],
@@ -928,85 +1383,30 @@ with tab_review:
                         for row in entries
                     ]
                     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-                    generated_ids = [int(row["id"]) for row in entries]
-                    approve_col, skip_col = st.columns(2)
-                    with approve_col:
-                        if st.button("Approve generated entries", type="primary", key=f"approve_generated_{source['id']}"):
-                            update_review_status(conn, generated_ids, "approved")
-                            st.rerun()
-                    with skip_col:
-                        if st.button("Skip generated entries", key=f"skip_generated_{source['id']}"):
-                            update_review_status(conn, generated_ids, "skipped")
-                            st.rerun()
 
-    elif queue in {"Unmapped with suggestions", "Unmapped without suggestions"}:
-        source, suggestions = load_next_unmapped(
-            conn,
-            require_suggestion=queue == "Unmapped with suggestions",
-            import_id=active_import_id,
-        )
+    with tab_no_match:
+        source, suggestions = load_next_unmapped(conn, require_suggestion=None, import_id=active_import_id)
         if not source:
-            st.info("No source cases in this queue.")
+            st.info("No unmatched source cases in this scope.")
         else:
-            source_context(conn, source)
-            defaults = default_values_for_source(source)
-            if suggestions:
-                st.caption("Suggested ACGME targets")
-                suggestion_labels = [
-                    f"{idx + 1}. {item['area']} / {item['type']} ({item['confidence']}, {item['score']:.3f})"
-                    for idx, item in enumerate(suggestions)
-                ]
-                selected_suggestion = st.radio("Suggestion", suggestion_labels, label_visibility="collapsed")
-                suggestion = suggestions[suggestion_labels.index(selected_suggestion)]
-                defaults.update(
-                    {
-                        "area": suggestion["area"],
-                        "type": suggestion["type"],
-                        "acgme_description": suggestion["acgme_description"],
-                        "acgme_def_category": suggestion["acgme_def_category"],
-                        "keyword": suggestion["keyword"],
-                        "component_label": suggestion["component_label"],
-                        "comments": suggestion["reason"],
-                    }
-                )
-                if st.button("Use suggestion", type="primary"):
-                    entry_id = create_manual_entry(conn, int(source["id"]), defaults)
-                    rule_id, applied = learn_from_source_case(conn, int(source["id"]), defaults, True)
-                    st.success(f"Created entry {entry_id}. Learned `{rule_id}`; applied to {applied} matching entries.")
-                    st.rerun()
+            render_review_workspace(
+                conn,
+                source,
+                lambda: no_match_review_card(conn, source, suggestions),
+                status="No match",
+            )
 
-            with st.expander("Edit"):
-                submitted, values, learn, apply_now = mapping_form("unmapped_edit_form", defaults, "Create entry")
-                if submitted:
-                    entry_id = create_manual_entry(conn, int(source["id"]), values)
-                    message = f"Created entry {entry_id}."
-                    if learn:
-                        rule_id, applied = learn_from_source_case(conn, int(source["id"]), values, apply_now)
-                        message += f" Learned `{rule_id}`; applied to {applied} matching entries."
-                    st.success(message)
-                    st.rerun()
-            if st.button("Skip"):
-                conn.execute(
-                    "UPDATE source_cases SET source_mapping_status = 'excluded', needs_review_reason = COALESCE(needs_review_reason, 'Skipped in review') WHERE id = ?",
-                    (source["id"],),
-                )
-                conn.commit()
-                st.rerun()
-
-    else:
-        failures = load_entries(conn, "Upload failures")
-        st.dataframe(failures, width="stretch", hide_index=True)
-        selected_raw = st.text_input("Failed entry IDs, comma-separated")
-        selected_ids = [int(x.strip()) for x in selected_raw.split(",") if x.strip().isdigit()]
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Reset selected", disabled=not selected_ids):
-                reset_upload(conn, selected_ids)
-                st.rerun()
-        with c2:
-            if st.button("Mark selected submitted", disabled=not selected_ids):
-                mark_upload_submitted(conn, selected_ids)
-                st.rerun()
+    with tab_failed:
+        source, entries = load_next_failed_upload_group(conn, active_import_id)
+        if not source:
+            st.info("No failed uploads in this scope.")
+        else:
+            render_review_workspace(
+                conn,
+                source,
+                lambda: failed_upload_review_card(conn, source, entries),
+                status="Failed upload",
+            )
 
 with tab_diagnostics:
     filter_name = st.selectbox(

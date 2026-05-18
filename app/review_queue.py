@@ -178,8 +178,7 @@ def review_counts(conn: sqlite3.Connection, import_id: int | None = None) -> dic
         generated_scope = "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = generated_entries.source_case_id AND isc.import_id = ?)"
         candidate_scope = "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = source_match_candidates.source_case_id AND isc.import_id = ?)"
         source_scope = "AND EXISTS (SELECT 1 FROM import_source_cases isc WHERE isc.source_case_id = source_cases.id AND isc.import_id = ?)"
-    return {
-        "batch_approvable": conn.execute(
+    batch_approvable = conn.execute(
             f"""
             SELECT COUNT(*) FROM generated_entries
             WHERE review_status = 'new_high_confidence'
@@ -190,8 +189,8 @@ def review_counts(conn: sqlite3.Connection, import_id: int | None = None) -> dic
               {generated_scope}
             """,
             scope_params,
-        ).fetchone()[0],
-        "needs_review": conn.execute(
+        ).fetchone()[0]
+    low_confidence = conn.execute(
             f"""
             SELECT COUNT(DISTINCT source_case_id)
             FROM (
@@ -205,28 +204,80 @@ def review_counts(conn: sqlite3.Connection, import_id: int | None = None) -> dic
               FROM generated_entries
               WHERE review_status IN ('new_high_confidence', 'needs_review')
                 AND upload_status IN ('not_uploaded', 'reset')
+                AND NOT (
+                  review_status = 'new_high_confidence'
+                  AND mapping_confidence = 'high'
+                  AND role_confidence = 'high'
+                  AND compound_flag = 0
+                )
                 {generated_scope}
             )
             """,
             (ALGORITHM_VERSION, *scope_params, *scope_params),
-        ).fetchone()[0],
-        "upload_failures": conn.execute(
+        ).fetchone()[0]
+    upload_failures = conn.execute(
             f"""
             SELECT COUNT(*) FROM generated_entries
             WHERE upload_status = 'failed'
               {generated_scope}
             """,
             scope_params,
-        ).fetchone()[0],
-        "unmapped_total": conn.execute(
+        ).fetchone()[0]
+    unmapped_total = conn.execute(
             f"""
             SELECT COUNT(*) FROM source_cases
             WHERE source_mapping_status IN ('unmapped', 'flag_only', 'llm_failed_unmapped')
               {source_scope}
             """,
             scope_params,
-        ).fetchone()[0],
+        ).fetchone()[0]
+    return {
+        "batch_approvable": batch_approvable,
+        "high_confidence": batch_approvable,
+        "needs_review": low_confidence,
+        "low_confidence": low_confidence,
+        "upload_failures": upload_failures,
+        "failed_uploads": upload_failures,
+        "unmapped_total": unmapped_total,
+        "no_match": unmapped_total,
     }
+
+
+def load_next_high_confidence_group(conn: sqlite3.Connection, import_id: int | None = None) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    scope = f"AND {_scope_exists_sql('sc')}" if import_id is not None else ""
+    params = (import_id,) if import_id is not None else ()
+    source = conn.execute(
+        f"""
+        SELECT sc.*
+        FROM source_cases sc
+        JOIN generated_entries ge ON ge.source_case_id = sc.id
+        WHERE ge.review_status = 'new_high_confidence'
+          AND ge.mapping_confidence = 'high'
+          AND ge.role_confidence = 'high'
+          AND ge.compound_flag = 0
+          AND ge.upload_status IN ('not_uploaded', 'reset')
+          {scope}
+        ORDER BY ge.id
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    if not source:
+        return None, []
+    entries = conn.execute(
+        """
+        SELECT * FROM generated_entries
+        WHERE source_case_id = ?
+          AND review_status = 'new_high_confidence'
+          AND mapping_confidence = 'high'
+          AND role_confidence = 'high'
+          AND compound_flag = 0
+          AND upload_status IN ('not_uploaded', 'reset')
+        ORDER BY id
+        """,
+        (source["id"],),
+    ).fetchall()
+    return source, entries
 
 
 def load_next_generated_group(conn: sqlite3.Connection, import_id: int | None = None) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
@@ -263,7 +314,40 @@ def load_next_generated_group(conn: sqlite3.Connection, import_id: int | None = 
     return source, entries
 
 
-def load_next_candidate_group(conn: sqlite3.Connection, import_id: int | None = None) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+def load_next_failed_upload_group(conn: sqlite3.Connection, import_id: int | None = None) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+    scope = f"AND {_scope_exists_sql('sc')}" if import_id is not None else ""
+    params = (import_id,) if import_id is not None else ()
+    source = conn.execute(
+        f"""
+        SELECT sc.*
+        FROM source_cases sc
+        JOIN generated_entries ge ON ge.source_case_id = sc.id
+        WHERE ge.upload_status = 'failed'
+          {scope}
+        ORDER BY COALESCE(ge.failure_timestamp, ge.updated_at, ge.created_at) DESC, ge.id
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    if not source:
+        return None, []
+    entries = conn.execute(
+        """
+        SELECT * FROM generated_entries
+        WHERE source_case_id = ?
+          AND upload_status = 'failed'
+        ORDER BY id
+        """,
+        (source["id"],),
+    ).fetchall()
+    return source, entries
+
+
+def load_next_candidate_group(
+    conn: sqlite3.Connection,
+    import_id: int | None = None,
+    include_unmapped: bool = True,
+) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
     scope = f"AND {_scope_exists_sql('sc')}" if import_id is not None else ""
     params = (import_id,) if import_id is not None else ()
     source = conn.execute(
@@ -274,6 +358,12 @@ def load_next_candidate_group(conn: sqlite3.Connection, import_id: int | None = 
         WHERE ge.review_status IN ('new_high_confidence', 'needs_review')
           AND ge.upload_status IN ('not_uploaded', 'reset')
           AND ge.mapping_rule_id LIKE 'llm:%'
+          AND NOT (
+            ge.review_status = 'new_high_confidence'
+            AND ge.mapping_confidence = 'high'
+            AND ge.role_confidence = 'high'
+            AND ge.compound_flag = 0
+          )
           AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
           {scope}
         ORDER BY ge.id
@@ -308,6 +398,12 @@ def load_next_candidate_group(conn: sqlite3.Connection, import_id: int | None = 
             JOIN generated_entries ge ON ge.source_case_id = sc.id
             WHERE ge.review_status IN ('new_high_confidence', 'needs_review')
               AND ge.upload_status IN ('not_uploaded', 'reset')
+              AND NOT (
+                ge.review_status = 'new_high_confidence'
+                AND ge.mapping_confidence = 'high'
+                AND ge.role_confidence = 'high'
+                AND ge.compound_flag = 0
+              )
               AND sc.source_mapping_status NOT IN ('candidate_reviewed', 'candidate_reviewed_empty', 'excluded')
               {scope}
             ORDER BY
@@ -318,7 +414,7 @@ def load_next_candidate_group(conn: sqlite3.Connection, import_id: int | None = 
             """,
             params,
         ).fetchone()
-    if not source:
+    if not source and include_unmapped:
         source = conn.execute(
             f"""
             SELECT sc.*

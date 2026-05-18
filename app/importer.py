@@ -203,6 +203,60 @@ def insert_generated_entries(
             count += 1
             entry_id = conn.execute("SELECT id FROM generated_entries WHERE dedupe_key = ?", (entry["dedupe_key"],)).fetchone()["id"]
             log_event(conn, entry_id, "generated", None, entry["review_status"], "importer", entry["mapping_rule_name"])
+            continue
+        existing = conn.execute(
+            """
+            SELECT id, review_status, upload_status
+            FROM generated_entries
+            WHERE dedupe_key = ?
+            """,
+            (entry["dedupe_key"],),
+        ).fetchone()
+        if not existing:
+            continue
+        if existing["review_status"] == "skipped" and existing["upload_status"] in {"not_uploaded", "reset"}:
+            conn.execute(
+                """
+                UPDATE generated_entries
+                SET component_label = ?, role = ?, site = ?, patient_type = ?, case_class = ?,
+                    acgme_code = ?, area = ?, type = ?, acgme_description = ?, acgme_def_category = ?,
+                    keyword = ?, comments = ?, mapping_rule_id = ?, mapping_rule_version = ?,
+                    mapping_rules_file_hash = ?, mapping_rule_name = ?, mapping_confidence = ?,
+                    role_confidence = ?, compound_flag = ?, review_status = ?, evidence_excerpt = ?,
+                    llm_model = ?, llm_prompt_version = ?, llm_raw_response_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    entry["component_label"],
+                    entry["role"],
+                    entry["site"],
+                    entry["patient_type"],
+                    entry["case_class"],
+                    entry.get("acgme_code", ""),
+                    entry["area"],
+                    entry["type"],
+                    entry.get("acgme_description", ""),
+                    entry.get("acgme_def_category", ""),
+                    entry["keyword"],
+                    entry["comments"],
+                    entry["mapping_rule_id"],
+                    entry["mapping_rule_version"],
+                    entry["mapping_rules_file_hash"],
+                    entry["mapping_rule_name"],
+                    entry["mapping_confidence"],
+                    entry["role_confidence"],
+                    entry["compound_flag"],
+                    entry["review_status"],
+                    entry.get("evidence_excerpt", ""),
+                    entry.get("llm_model", ""),
+                    entry.get("llm_prompt_version", ""),
+                    entry.get("llm_raw_response_json", ""),
+                    now,
+                    existing["id"],
+                ),
+            )
+            count += 1
+            log_event(conn, existing["id"], "regenerated", "skipped", entry["review_status"], "importer", entry["mapping_rule_name"])
     return count
 
 
